@@ -1,0 +1,405 @@
+"""Chat tool registry — single source of truth for tool schemas and execution.
+
+Imports the 7 MCP tool functions directly and exposes them as a callable registry
+for the agentic chat loop. Also provides OpenAI-format tool definitions for the LLM.
+"""
+
+from __future__ import annotations
+
+import logging
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
+from typing import Any
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class ToolDef:
+    """A tool definition with schema and callable."""
+
+    name: str
+    description: str
+    parameters: dict[str, Any]  # JSON Schema
+    function: Callable[..., Awaitable[dict[str, Any]]]
+    artifact_type: str  # For the frontend artifact panel
+
+
+# ---------------------------------------------------------------------------
+# Tool schemas (matching FastMCP's auto-generated schemas from function sigs)
+# ---------------------------------------------------------------------------
+
+_TOOL_SCHEMAS: list[dict[str, Any]] = [
+    {
+        "name": "get_overview",
+        "description": "Get a high-level overview of the repository: architecture, key modules, entry points.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "repo": {
+                    "type": "string",
+                    "description": "Repository path, name, or ID. Omit if only one repo.",
+                },
+            },
+            "required": [],
+        },
+        "artifact_type": "overview",
+    },
+    {
+        "name": "get_context",
+        "description": "Get documentation, ownership, freshness, and decisions for one or more files, modules, or symbols.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "targets": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "File paths, module paths, or symbol names to look up.",
+                },
+                "include": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "enum": [
+                            "docs",
+                            "full_doc",
+                            "ownership",
+                            "last_change",
+                            "decisions",
+                            "freshness",
+                            "source",
+                            "callers",
+                            "callees",
+                            "metrics",
+                            "community",
+                        ],
+                    },
+                    "description": "Data blocks to include. Default: docs + freshness.",
+                },
+                "repo": {"type": "string", "description": "Repository identifier."},
+            },
+            "required": ["targets"],
+        },
+        "artifact_type": "wiki_page",
+    },
+    {
+        "name": "get_risk",
+        "description": "Assess modification risk with trend analysis: hotspot score + velocity (increasing/stable/decreasing), risk type (churn-heavy/bug-prone/high-coupling), impact surface (top 3 modules that would break), dependents, co-change partners, ownership.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "targets": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "File paths to assess risk for.",
+                },
+                "repo": {"type": "string", "description": "Repository identifier."},
+            },
+            "required": ["targets"],
+        },
+        "artifact_type": "risk_report",
+    },
+    {
+        "name": "get_change_risk",
+        "description": "Score the defect risk of a live commit or branch range from diff size, diffusion, and author familiarity. Use for pre-merge ranking; use get_risk for per-file history and blast radius.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "revspec": {
+                    "type": "string",
+                    "description": "Commit or base..head range to score. Defaults to HEAD.",
+                    "default": "HEAD",
+                },
+                "repo": {"type": "string", "description": "Repository identifier."},
+                "extensions": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "File suffixes to count, for example .py or .ts.",
+                },
+                "exclude_patterns": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Gitignore-style paths to omit from the score and baseline.",
+                },
+                "baseline": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "default": 200,
+                    "description": "Recent commits used for percentile ranking; 0 disables it.",
+                },
+            },
+            "required": [],
+        },
+        "artifact_type": "risk_report",
+    },
+    {
+        "name": "get_why",
+        "description": "Intent archaeology: understand why code was built a certain way. Path lookup returns origin story (who, when, key commits linked to decisions) and alignment score. Natural language search scores across all decision fields. Use targets to anchor search to specific files.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "Natural language question, file/module path, or omit for health dashboard.",
+                },
+                "targets": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "File paths to anchor the search. Decisions governing these files are prioritized.",
+                },
+                "repo": {"type": "string", "description": "Repository identifier."},
+            },
+            "required": [],
+        },
+        "artifact_type": "decisions",
+    },
+    {
+        "name": "search_codebase",
+        "description": "Semantic and full-text search across all wiki documentation pages.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Natural language search query."},
+                "limit": {
+                    "type": "integer",
+                    "description": "Max results (default 5).",
+                    "default": 5,
+                },
+                "page_type": {
+                    "type": "string",
+                    "description": "Filter by page type (e.g., file_page, module_page).",
+                },
+                "repo": {"type": "string", "description": "Repository identifier."},
+            },
+            "required": ["query"],
+        },
+        "artifact_type": "search_results",
+    },
+    {
+        "name": "get_dead_code",
+        "description": "Get a tiered refactor plan for dead code. Returns findings in high/medium/low confidence tiers with per-directory rollups, ownership hotspots, and impact estimates. Use group_by for rollup views, tier to focus on one band.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "repo": {"type": "string", "description": "Repository identifier."},
+                "kind": {
+                    "type": "string",
+                    "description": "Filter: unreachable_file, unused_export, unused_internal, zombie_package.",
+                },
+                "min_confidence": {
+                    "type": "number",
+                    "description": "Minimum confidence threshold (default 0.5).",
+                    "default": 0.5,
+                },
+                "safe_only": {
+                    "type": "boolean",
+                    "description": "Only return safe-to-delete findings.",
+                    "default": False,
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Max findings per tier (default 20).",
+                    "default": 20,
+                },
+                "tier": {
+                    "type": "string",
+                    "description": "Focus on one tier: high (>=0.8), medium (0.5-0.8), or low (<0.5).",
+                },
+                "directory": {
+                    "type": "string",
+                    "description": "Filter to a directory prefix (e.g. src/legacy).",
+                },
+                "owner": {"type": "string", "description": "Filter by primary owner name."},
+                "group_by": {
+                    "type": "string",
+                    "description": "Rollup view: 'directory' or 'owner'.",
+                },
+            },
+            "required": [],
+        },
+        "artifact_type": "dead_code",
+    },
+]
+
+
+def _build_registry() -> dict[str, ToolDef]:
+    """Build the tool registry by importing MCP tool functions."""
+    from repowise.server.mcp_server import (
+        get_change_risk,
+        get_context,
+        get_dead_code,
+        get_overview,
+        get_risk,
+        get_why,
+        search_codebase,
+    )
+
+    async def _search_concept(query: str, **kwargs):
+        # Chat surfaces wiki documentation pages (see the schema/artifact_type
+        # below), so pin the concept branch — the symbol/path modes return
+        # symbol/file shapes the chat artifact renderer doesn't expect.
+        kwargs["mode"] = "concept"
+        return await search_codebase(query, **kwargs)
+
+    func_map: dict[str, Callable] = {
+        "get_overview": get_overview,
+        "get_context": get_context,
+        "get_change_risk": get_change_risk,
+        "get_risk": get_risk,
+        "get_why": get_why,
+        "search_codebase": _search_concept,
+        "get_dead_code": get_dead_code,
+    }
+
+    registry: dict[str, ToolDef] = {}
+    for schema in _TOOL_SCHEMAS:
+        name = schema["name"]
+        registry[name] = ToolDef(
+            name=name,
+            description=schema["description"],
+            parameters=schema["parameters"],
+            function=func_map[name],
+            artifact_type=schema["artifact_type"],
+        )
+    return registry
+
+
+# Lazy singleton
+_registry: dict[str, ToolDef] | None = None
+
+
+def get_tool_registry() -> dict[str, ToolDef]:
+    """Get the tool registry (lazy-initialized)."""
+    global _registry
+    if _registry is None:
+        _registry = _build_registry()
+    return _registry
+
+
+def get_tool_schemas_for_llm() -> list[dict[str, Any]]:
+    """Return OpenAI-format tool definitions for the LLM."""
+    return [
+        {
+            "type": "function",
+            "function": {
+                "name": schema["name"],
+                "description": schema["description"],
+                "parameters": schema["parameters"],
+            },
+        }
+        for schema in _TOOL_SCHEMAS
+    ]
+
+
+def _make_json_serializable(obj: Any) -> Any:
+    """Recursively ensure an object is JSON-serializable."""
+    if obj is None or isinstance(obj, (bool, int, float, str)):
+        return obj
+    if isinstance(obj, dict):
+        return {str(k): _make_json_serializable(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_make_json_serializable(item) for item in obj]
+    if hasattr(obj, "__dict__"):
+        return _make_json_serializable(vars(obj))
+    return str(obj)
+
+
+def _scope_repo_arg(tool_def: ToolDef, arguments: dict[str, Any], repo: str | None) -> None:
+    """Point a tool call at the repo the chat page is on.
+
+    The model only sees the repo *name* in the system prompt, so left to
+    itself it passes a string that may not be a workspace alias at all. We
+    keep its value when it names a real repo (so "compare with gateway"
+    still works) and otherwise substitute the caller's alias.
+    """
+    if not repo or "repo" not in tool_def.parameters.get("properties", {}):
+        return
+
+    import repowise.server.mcp_server as mcp_mod
+
+    workspace = mcp_mod._registry
+    if workspace is None:
+        return
+
+    requested = arguments.get("repo")
+    if requested == "all" or requested in workspace.get_all_aliases():
+        return
+    arguments["repo"] = repo
+
+
+async def execute_tool(
+    name: str, arguments: dict[str, Any], repo: str | None = None
+) -> dict[str, Any]:
+    """Execute a tool by name and return JSON-serializable result.
+
+    ``repo`` is the alias of the repo the request is scoped to (workspace
+    mode). It backstops the ``repo`` argument the model supplies.
+    """
+    registry = get_tool_registry()
+    tool_def = registry.get(name)
+    if not tool_def:
+        return {"error": f"Unknown tool: {name}"}
+
+    try:
+        arguments = dict(arguments)
+        _scope_repo_arg(tool_def, arguments, repo)
+        result = await tool_def.function(**arguments)
+        return _make_json_serializable(result)
+    except Exception as exc:
+        logger.exception("Tool execution failed: %s", name)
+        return {"error": f"{type(exc).__name__}: {exc}"}
+
+
+def get_artifact_type(tool_name: str) -> str:
+    """Get the artifact type for a tool's results."""
+    registry = get_tool_registry()
+    tool_def = registry.get(tool_name)
+    return tool_def.artifact_type if tool_def else "unknown"
+
+
+def init_tool_state(
+    session_factory: Any,
+    fts: Any,
+    vector_store: Any,
+    decision_store: Any | None = None,
+    repo_path: str | None = None,
+) -> None:
+    """Bridge FastAPI app state to the MCP server module globals.
+
+    Must be called during app lifespan startup so that direct tool calls
+    from the chat router use the same DB session factory and stores.
+    """
+    import repowise.server.mcp_server as mcp_mod
+
+    mcp_mod._session_factory = session_factory
+    mcp_mod._fts = fts
+    mcp_mod._vector_store = vector_store
+    if decision_store is not None:
+        mcp_mod._decision_store = decision_store
+    if repo_path is not None:
+        mcp_mod._repo_path = repo_path
+    logger.info("Chat tool state initialized")
+
+
+_UNSET = object()
+
+
+def set_tool_workspace(
+    registry: Any = _UNSET,
+    workspace_root: Any = _UNSET,
+    cross_repo_enricher: Any = _UNSET,
+) -> None:
+    """Publish workspace state to the MCP tool globals.
+
+    The stdio MCP server sets these in its own lifespan; the HTTP server has
+    to do the same or the tools resolve every alias against the primary
+    repo's database alone (issue #970). Arguments left out are untouched.
+    """
+    import repowise.server.mcp_server as mcp_mod
+
+    if registry is not _UNSET:
+        mcp_mod._registry = registry
+    if workspace_root is not _UNSET:
+        mcp_mod._workspace_root = workspace_root
+    if cross_repo_enricher is not _UNSET:
+        mcp_mod._cross_repo_enricher = cross_repo_enricher

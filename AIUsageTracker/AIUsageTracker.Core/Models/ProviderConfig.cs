@@ -1,0 +1,51 @@
+// <copyright file="ProviderConfig.cs" company="AIUsageTracker">
+// Copyright (c) AIUsageTracker. All rights reserved.
+// </copyright>
+
+using System.ComponentModel.DataAnnotations;
+using System.Text.Json.Serialization;
+
+namespace AIUsageTracker.Core.Models;
+
+public class ProviderConfig
+{
+    [Required(ErrorMessage = "ProviderId is required")]
+    [StringLength(100, MinimumLength = 1)]
+    [RegularExpression(@"^[a-z0-9\-]+$", ErrorMessage = "ProviderId must contain only lowercase letters, numbers, and hyphens")]
+    [JsonPropertyName("provider_id")]
+    public string ProviderId { get; set; } = string.Empty;
+
+    [StringLength(500, MinimumLength = 0)]
+    [JsonPropertyName("api_key")]
+    public string ApiKey { get; set; } = string.Empty;
+
+    [Range(0, double.MaxValue, ErrorMessage = "Limit must be non-negative")]
+    [JsonPropertyName("limit")]
+    public double? Limit { get; set; } // For cost tracking
+
+    [StringLength(500)]
+    [JsonPropertyName("base_url")]
+    public string? BaseUrl { get; set; }
+
+    [JsonPropertyName("show_in_tray")]
+    public bool ShowInTray { get; set; }
+
+    [JsonPropertyName("enable_notifications")]
+    public bool EnableNotifications { get; set; } // Default to disabled
+
+    [JsonPropertyName("enabled_sub_trays")]
+    public IReadOnlyList<string> EnabledSubTrays { get; set; } = [];
+
+    [JsonPropertyName("auth_source")]
+    [StringLength(100)]
+    public string AuthSource { get; set; } = string.Empty;
+
+    [JsonIgnore]
+    public string? Description { get; set; }
+
+    [JsonPropertyName("models")]
+    public IReadOnlyList<AIModelConfig> Models { get; set; } = [];
+
+    [JsonPropertyName("show_cached_models_when_offline")]
+    public bool ShowCachedModelsWhenOffline { get; set; }
+}

@@ -1,0 +1,96 @@
+// <copyright file="MistralProvider.cs" company="AIUsageTracker">
+// Copyright (c) AIUsageTracker. All rights reserved.
+// </copyright>
+
+using System.Text.Json;
+using AIUsageTracker.Core.Interfaces;
+using AIUsageTracker.Core.Models;
+using AIUsageTracker.Core.Providers;
+using Microsoft.Extensions.Logging;
+
+namespace AIUsageTracker.Infrastructure.Providers;
+
+public class MistralProvider : ProviderBase
+{
+    private const string ModelsEndpoint = "https://api.mistral.ai/v1/models";
+
+    private readonly HttpClient _httpClient;
+    private readonly ILogger<MistralProvider> _logger;
+
+    public MistralProvider(HttpClient httpClient, ILogger<MistralProvider> logger, IProviderDiscoveryService? discoveryService = null)
+        : base(discoveryService)
+    {
+        this._httpClient = httpClient;
+        this._logger = logger;
+    }
+
+    public static ProviderDefinition StaticDefinition { get; } = new(
+        "mistral",
+        "Mistral",
+        PlanType.Usage,
+        isQuotaBased: false)
+    {
+        RooConfigPropertyNames = new[] { "mistralApiKey" },
+        IsStatusOnly = true,
+        IconAssetName = "mistral",
+        BadgeColorHex = "#FF4500",
+        BadgeInitial = "Mi",
+    };
+
+    /// <inheritdoc/>
+    public override ProviderDefinition Definition => StaticDefinition;
+
+    /// <inheritdoc/>
+    public override string ProviderId => StaticDefinition.ProviderId;
+
+    /// <inheritdoc/>
+    public override async Task<IEnumerable<ProviderUsage>> GetUsageAsync(ProviderConfig config, Action<ProviderUsage>? progressCallback = null, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(config);
+
+        var providerLabel = ProviderMetadataCatalog.GetConfiguredDisplayName(config.ProviderId);
+
+        var apiKey = config.ApiKey;
+
+        if (string.IsNullOrEmpty(apiKey) && this.DiscoveryService != null)
+        {
+            apiKey = this.DiscoveryService.GetEnvironmentVariable("MISTRAL_API_KEY");
+        }
+
+        if (string.IsNullOrEmpty(apiKey))
+        {
+            return new[] { this.CreateUnavailableUsage("API Key missing", state: ProviderUsageState.Missing) };
+        }
+
+        // Mistral does not have a public usage/billing API endpoint
+        // We verify the key works by calling the models list endpoint
+        try
+        {
+            var request = CreateBearerRequest(HttpMethod.Get, ModelsEndpoint, apiKey);
+
+            var response = await this._httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
+            var content = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+
+            if (response.IsSuccessStatusCode)
+            {
+                var usage = CreateQuotaUsage(config);
+                usage.ProviderName = providerLabel;
+                usage.IsAvailable = true;
+                usage.IsQuotaBased = this.Definition.IsQuotaBased;
+                usage.PlanType = this.Definition.PlanType;
+                usage.RawJson = content;
+                usage.HttpStatus = (int)response.StatusCode;
+                usage.UsedPercent = 0;
+                usage.Description = "Connected (Check Dashboard)";
+                return new[] { usage };
+            }
+
+            return new[] { this.CreateUnavailableUsage(DescribeUnavailableStatus(response.StatusCode), (int)response.StatusCode) };
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
+        {
+            this._logger.LogError(ex, "Failed to verify Mistral API key");
+            return new[] { this.CreateUnavailableUsage(DescribeUnavailableException(ex, "Failed to verify Mistral API key")) };
+        }
+    }
+}

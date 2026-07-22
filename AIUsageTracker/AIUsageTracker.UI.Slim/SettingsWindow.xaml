@@ -1,0 +1,963 @@
+<Window x:Class="AIUsageTracker.UI.Slim.SettingsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:behaviors="clr-namespace:AIUsageTracker.UI.Slim.Behaviors"
+        Title="AI Usage Tracker - Settings" Height="600" Width="600"
+        MinWidth="550" MinHeight="500"
+        WindowStyle="None" ResizeMode="CanResize"
+        Background="{DynamicResource Background}"
+        Foreground="{DynamicResource PrimaryText}"
+        ShowInTaskbar="True"
+        WindowStartupLocation="CenterScreen"
+        Icon="Assets/app_icon.ico"
+        PreviewKeyDown="Window_PreviewKeyDown">
+
+    <Window.Resources>
+        <Style x:Key="ComboBoxToggleButton" TargetType="ToggleButton">
+            <Setter Property="OverridesDefaultStyle" Value="true"/>
+            <Setter Property="IsTabStop" Value="false"/>
+            <Setter Property="Focusable" Value="false"/>
+            <Setter Property="ClickMode" Value="Press"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ToggleButton">
+                        <Border x:Name="templateRoot"
+                                Background="{DynamicResource ComboBoxBackground}"
+                                BorderBrush="{DynamicResource ControlBorder}"
+                                BorderThickness="{TemplateBinding BorderThickness}">
+                            <Border Width="30"
+                                    HorizontalAlignment="Right"
+                                    BorderBrush="Transparent"
+                                    BorderThickness="1"
+                                    SnapsToDevicePixels="true">
+                                <Path Data="M0,0 L10,0 L5,6 z"
+                                      Fill="{DynamicResource PrimaryText}"
+                                      HorizontalAlignment="Center"
+                                      VerticalAlignment="Center"/>
+                            </Border>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="true">
+                                <Setter TargetName="templateRoot" Property="Background" Value="{DynamicResource ComboBoxItemHover}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style TargetType="ComboBox">
+            <Setter Property="Foreground" Value="{DynamicResource PrimaryText}"/>
+            <Setter Property="Background" Value="{DynamicResource ComboBoxBackground}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource ControlBorder}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Auto"/>
+            <Setter Property="ScrollViewer.VerticalScrollBarVisibility" Value="Auto"/>
+            <Setter Property="Padding" Value="6,3,5,3"/>
+            <Setter Property="ScrollViewer.CanContentScroll" Value="true"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ComboBox">
+                        <Grid x:Name="templateRoot" SnapsToDevicePixels="true">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition MinWidth="{DynamicResource {x:Static SystemParameters.VerticalScrollBarWidthKey}}" Width="0"/>
+                            </Grid.ColumnDefinitions>
+                            <Popup x:Name="PART_Popup"
+                                   AllowsTransparency="true"
+                                   Grid.ColumnSpan="2"
+                                   IsOpen="{Binding IsDropDownOpen, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}"
+                                   Margin="1"
+                                   PopupAnimation="{DynamicResource {x:Static SystemParameters.ComboBoxPopupAnimationKey}}"
+                                   Placement="Bottom">
+                                <Border x:Name="dropDownBorder"
+                                        Background="{DynamicResource ComboBoxBackground}"
+                                        BorderBrush="{DynamicResource ControlBorder}"
+                                        BorderThickness="1"
+                                        MaxHeight="{TemplateBinding MaxDropDownHeight}"
+                                        MinWidth="{Binding ActualWidth, ElementName=templateRoot}">
+                                    <ScrollViewer x:Name="DropDownScrollViewer">
+                                        <Grid x:Name="grid" RenderOptions.ClearTypeHint="Enabled">
+                                            <Canvas x:Name="canvas"
+                                                    HorizontalAlignment="Left"
+                                                    Height="0"
+                                                    VerticalAlignment="Top"
+                                                    Width="0">
+                                                <Rectangle x:Name="opaqueRect"
+                                                           Fill="{Binding Background, ElementName=dropDownBorder}"
+                                                           Height="{Binding ActualHeight, ElementName=dropDownBorder}"
+                                                           Width="{Binding ActualWidth, ElementName=dropDownBorder}"/>
+                                            </Canvas>
+                                            <ItemsPresenter x:Name="ItemsPresenter"
+                                                            KeyboardNavigation.DirectionalNavigation="Contained"
+                                                            SnapsToDevicePixels="{TemplateBinding SnapsToDevicePixels}"/>
+                                        </Grid>
+                                    </ScrollViewer>
+                                </Border>
+                            </Popup>
+                            <ToggleButton x:Name="toggleButton"
+                                          BorderBrush="{TemplateBinding BorderBrush}"
+                                          BorderThickness="{TemplateBinding BorderThickness}"
+                                          Background="{TemplateBinding Background}"
+                                          Grid.ColumnSpan="2"
+                                          IsChecked="{Binding IsDropDownOpen, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}"
+                                          Style="{StaticResource ComboBoxToggleButton}"/>
+                            <ContentPresenter x:Name="contentPresenter"
+                                              ContentStringFormat="{TemplateBinding SelectionBoxItemStringFormat}"
+                                              ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}"
+                                              Content="{TemplateBinding SelectionBoxItem}"
+                                              ContentTemplateSelector="{TemplateBinding ItemTemplateSelector}"
+                                              HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                              IsHitTestVisible="false"
+                                              Margin="{TemplateBinding Padding}"
+                                              SnapsToDevicePixels="{TemplateBinding SnapsToDevicePixels}"
+                                              VerticalAlignment="{TemplateBinding VerticalContentAlignment}"/>
+                            <TextBox x:Name="PART_EditableTextBox"
+                                     HorizontalContentAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                     IsReadOnly="{Binding IsReadOnly, RelativeSource={RelativeSource TemplatedParent}}"
+                                     Margin="{TemplateBinding Padding}"
+                                     Style="{StaticResource {x:Type TextBox}}"
+                                     VerticalContentAlignment="{TemplateBinding VerticalContentAlignment}"
+                                     Visibility="Hidden"/>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="HasItems" Value="false">
+                                <Setter TargetName="dropDownBorder" Property="Height" Value="95"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="false">
+                                <Setter Property="Foreground" Value="{DynamicResource {x:Static SystemColors.GrayTextBrushKey}}"/>
+                                <Setter TargetName="PART_EditableTextBox" Property="Foreground" Value="{DynamicResource {x:Static SystemColors.GrayTextBrushKey}}"/>
+                            </Trigger>
+                            <Trigger Property="IsGrouping" Value="true">
+                                <Setter Property="ScrollViewer.CanContentScroll" Value="false"/>
+                            </Trigger>
+                            <Trigger Property="IsEditable" Value="true">
+                                <Setter Property="IsTabStop" Value="false"/>
+                                <Setter TargetName="PART_EditableTextBox" Property="Visibility" Value="Visible"/>
+                                <Setter TargetName="contentPresenter" Property="Visibility" Value="Hidden"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+            <Setter Property="ItemContainerStyle">
+                <Setter.Value>
+                    <Style TargetType="ComboBoxItem">
+                        <Setter Property="Background" Value="{DynamicResource ComboBoxBackground}"/>
+                        <Setter Property="Foreground" Value="{DynamicResource PrimaryText}"/>
+                        <Setter Property="BorderThickness" Value="0"/>
+                        <Setter Property="Padding" Value="5,2"/>
+                        <Setter Property="Template">
+                            <Setter.Value>
+                                <ControlTemplate TargetType="ComboBoxItem">
+                                    <Border x:Name="Border" Background="{TemplateBinding Background}" Padding="{TemplateBinding Padding}">
+                                        <ContentPresenter />
+                                    </Border>
+                                    <ControlTemplate.Triggers>
+                                        <Trigger Property="IsMouseOver" Value="True">
+                                            <Setter TargetName="Border" Property="Background" Value="{DynamicResource ComboBoxItemHover}"/>
+                                        </Trigger>
+                                        <Trigger Property="IsSelected" Value="True">
+                                            <Setter TargetName="Border" Property="Background" Value="{DynamicResource AccentColor}"/>
+                                            <Setter Property="Foreground" Value="{DynamicResource AccentForeground}"/>
+                                        </Trigger>
+                                    </ControlTemplate.Triggers>
+                                </ControlTemplate>
+                            </Setter.Value>
+                        </Setter>
+                    </Style>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="DarkDataGridColumnHeaderStyle" TargetType="DataGridColumnHeader">
+            <Setter Property="Background" Value="{DynamicResource HeaderBackground}"/>
+            <Setter Property="Foreground" Value="{DynamicResource PrimaryText}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderColor}"/>
+            <Setter Property="BorderThickness" Value="0,0,1,1"/>
+            <Setter Property="Padding" Value="8,6"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+        </Style>
+
+        <Style x:Key="DarkDataGridCellStyle" TargetType="DataGridCell">
+            <Setter Property="Foreground" Value="{DynamicResource PrimaryText}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderColor}"/>
+            <Setter Property="BorderThickness" Value="0,0,0,1"/>
+            <Setter Property="Padding" Value="6,4"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Style.Triggers>
+                <Trigger Property="IsSelected" Value="True">
+                    <Setter Property="Background" Value="{DynamicResource AccentColor}"/>
+                    <Setter Property="Foreground" Value="{DynamicResource AccentForeground}"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+
+        <Style TargetType="DataGrid">
+            <Setter Property="Background" Value="{DynamicResource CardBackground}"/>
+            <Setter Property="Foreground" Value="{DynamicResource PrimaryText}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource CardBorder}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="GridLinesVisibility" Value="Horizontal"/>
+            <Setter Property="HorizontalGridLinesBrush" Value="{DynamicResource BorderColor}"/>
+            <Setter Property="VerticalGridLinesBrush" Value="{DynamicResource BorderColor}"/>
+            <Setter Property="RowBackground" Value="{DynamicResource CardBackground}"/>
+            <Setter Property="AlternatingRowBackground" Value="{DynamicResource ControlBackground}"/>
+            <Setter Property="RowHeaderWidth" Value="0"/>
+            <Setter Property="ColumnHeaderStyle" Value="{StaticResource DarkDataGridColumnHeaderStyle}"/>
+            <Setter Property="CellStyle" Value="{StaticResource DarkDataGridCellStyle}"/>
+        </Style>
+    </Window.Resources>
+
+    <WindowChrome.WindowChrome>
+        <WindowChrome CaptionHeight="50" ResizeBorderThickness="5" GlassFrameThickness="0" CornerRadius="0" />
+    </WindowChrome.WindowChrome>
+
+    <Border BorderBrush="{DynamicResource BorderColor}" BorderThickness="1">
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+
+            <!-- Header -->
+            <Border Background="{DynamicResource HeaderBackground}" Padding="12" Grid.Row="0">
+                <DockPanel>
+                    <Image Source="Assets/app_icon.ico" Width="16" Height="16" Margin="0,0,8,0" DockPanel.Dock="Left"/>
+                    <TextBlock Text="Settings" FontSize="15" FontWeight="Bold" 
+                               VerticalAlignment="Center" Foreground="{DynamicResource PrimaryText}"/>
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                        <Button x:Name="PrivacyBtn" Content="&#xE785;" Click="PrivacyBtn_Click" 
+                                Background="Transparent" Foreground="{DynamicResource SecondaryText}" 
+                                Width="30" Margin="0,0,10,0" ToolTip="Toggle Privacy Mode" 
+                                FontFamily="Segoe MDL2 Assets" FontSize="14"
+                                WindowChrome.IsHitTestVisibleInChrome="True"/>
+                        <Button Content="X" behaviors:CloseWindowBehavior.CloseOnClick="True" Background="Transparent"
+                                Foreground="{DynamicResource SecondaryText}" Width="20"
+                                WindowChrome.IsHitTestVisibleInChrome="True"/>
+                    </StackPanel>
+                </DockPanel>
+            </Border>
+
+            <!-- Tab Control -->
+            <TabControl x:Name="MainTabControl" Grid.Row="1" Background="{DynamicResource Background}" 
+                        BorderBrush="{DynamicResource BorderColor}" BorderThickness="0,1,0,0">
+                <TabControl.Resources>
+                    <Style TargetType="TabItem">
+                        <Setter Property="Padding" Value="16,8"/>
+                        <Setter Property="FontSize" Value="12"/>
+                        <Setter Property="Foreground" Value="{DynamicResource SecondaryText}"/>
+                        <Setter Property="Background" Value="{DynamicResource TabUnselected}"/>
+                        <Setter Property="BorderBrush" Value="{DynamicResource BorderColor}"/>
+                        <Setter Property="BorderThickness" Value="1,1,1,0"/>
+                        <Setter Property="Template">
+                            <Setter.Value>
+                                <ControlTemplate TargetType="TabItem">
+                                    <Grid>
+                                        <Border Name="Border" Background="{TemplateBinding Background}" 
+                                                BorderBrush="{TemplateBinding BorderBrush}" 
+                                                BorderThickness="{TemplateBinding BorderThickness}" 
+                                                Padding="{TemplateBinding Padding}" Margin="0,0,0,0">
+                                            <ContentPresenter x:Name="ContentSite" ContentSource="Header" 
+                                                              HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                        </Border>
+                                    </Grid>
+                                    <ControlTemplate.Triggers>
+                                        <Trigger Property="IsSelected" Value="True">
+                                            <Setter TargetName="Border" Property="Background" Value="{DynamicResource Background}"/>
+                                            <Setter Property="Foreground" Value="{DynamicResource PrimaryText}"/>
+                                        </Trigger>
+                                        <Trigger Property="IsMouseOver" Value="True">
+                                            <Setter Property="Foreground" Value="{DynamicResource PrimaryText}"/>
+                                        </Trigger>
+                                    </ControlTemplate.Triggers>
+                                </ControlTemplate>
+                            </Setter.Value>
+                        </Setter>
+                    </Style>
+                </TabControl.Resources>
+
+                <!-- Providers Tab -->
+                <TabItem Header="Providers">
+                    <ScrollViewer Padding="0" VerticalScrollBarVisibility="Auto">
+                        <StackPanel Margin="20">
+                            <StackPanel x:Name="ProvidersStack"/>
+                            <!-- Provider Card Visibility (populated dynamically in code-behind) -->
+                            <TextBlock Text="Card Visibility" FontWeight="Bold" FontSize="14"
+                                       Margin="0,20,0,8" Foreground="{DynamicResource PrimaryText}"/>
+                            <TextBlock Text="Choose which provider cards appear in the main window."
+                                       FontSize="11" Margin="0,0,0,10"
+                                       Foreground="{DynamicResource SecondaryText}" TextWrapping="Wrap"/>
+                            <StackPanel x:Name="ProviderCardVisibilityPanel"/>
+                        </StackPanel>
+                    </ScrollViewer>
+                </TabItem>
+
+                <!-- Layout Tab -->
+                <TabItem Header="Cards">
+                    <Grid Margin="12,10,12,10">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="*"/>
+                        </Grid.RowDefinitions>
+
+                        <!-- Section 1: Progress Bar & Colours -->
+                        <Grid Grid.Row="0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="20"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+
+                            <!-- Left: Progress bar appearance -->
+                            <StackPanel Grid.Column="0">
+                                <TextBlock Text="Progress Bar" FontWeight="Bold" FontSize="12"
+                                           Foreground="{DynamicResource PrimaryText}"/>
+                                <TextBlock Text="How usage progress is displayed on each card"
+                                           FontSize="9" Foreground="{DynamicResource TertiaryText}" Margin="0,1,0,6"/>
+
+                                <CheckBox x:Name="BackgroundBarCheck" Content="Show progress bar fill"
+                                          Foreground="{DynamicResource SecondaryText}" FontSize="11"
+                                          ToolTip="When enabled, the card background fills proportionally to usage.&#x0a;When disabled, a thin colour stripe on the left edge indicates status."
+                                          Checked="CardCompactMode_Changed" Unchecked="CardCompactMode_Changed" Margin="0,2"/>
+                                <CheckBox x:Name="CompactModeCheck" Content="No quota bar in background"
+                                          Foreground="{DynamicResource SecondaryText}" FontSize="11"
+                                          ToolTip="Removes the background progress fill entirely.&#x0a;Only the left-edge colour indicator remains."
+                                          Checked="CardCompactMode_Changed" Unchecked="CardCompactMode_Changed" Margin="0,2"/>
+
+                                <!-- Dual bars sub-group -->
+                                <CheckBox x:Name="ShowDualQuotaBarsCheck" Content="Dual quota bars"
+                                          Foreground="{DynamicResource SecondaryText}" FontSize="11"
+                                          ToolTip="Providers with two quota windows (e.g. 5-hour burst + 7-day rolling)&#x0a;show two stacked progress bars instead of one."
+                                          Checked="LayoutSetting_Changed" Unchecked="LayoutSetting_Changed" Margin="0,6,0,2"/>
+                                <Grid Margin="18,0,0,0"
+                                      ToolTip="When dual bars are disabled, choose which quota window&#x0a;the single bar represents.">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="Single-bar window" VerticalAlignment="Center"
+                                               Foreground="{DynamicResource TertiaryText}" Margin="0,0,8,0" FontSize="10"/>
+                                    <ComboBox x:Name="DualQuotaBarWindowCombo" Grid.Column="1" Height="22"
+                                              Background="{DynamicResource ControlBackground}" Foreground="{DynamicResource PrimaryText}"
+                                              BorderBrush="{DynamicResource ControlBorder}" FontSize="10"
+                                              SelectionChanged="LayoutSetting_Changed"/>
+                                </Grid>
+
+                                <!-- Pace colours sub-group -->
+                                <CheckBox x:Name="EnablePaceAdjustmentCheck" Content="Pace-aware colours"
+                                          Foreground="{DynamicResource SecondaryText}" FontSize="11"
+                                          ToolTip="Adjusts bar colour based on projected usage at the end of the period.&#x0a;A provider at 30% used with 6 days left shows green (on pace),&#x0a;even though 30% would normally be below the warning threshold."
+                                          Checked="LayoutSetting_Changed" Unchecked="LayoutSetting_Changed" Margin="0,6,0,2"/>
+                                <Grid Margin="18,2,0,0"
+                                      ToolTip="Set at which projected usage percentage the bar turns yellow or red.&#x0a;These thresholds apply to both pace-adjusted and raw usage modes.">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="38"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="38"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="Yellow at" VerticalAlignment="Center"
+                                               Foreground="{DynamicResource TertiaryText}" FontSize="10" Margin="0,0,4,0"/>
+                                    <TextBox x:Name="YellowThreshold" Grid.Column="1" Text="60"
+                                             Background="{DynamicResource ControlBackground}" Foreground="{DynamicResource PrimaryText}"
+                                             BorderBrush="{DynamicResource ControlBorder}" Padding="4,2" FontSize="10"
+                                             ToolTip="Usage percentage where the bar turns yellow (warning)"
+                                             TextChanged="LayoutSetting_TextChanged"/>
+                                    <TextBlock Grid.Column="2" Text="Red at" VerticalAlignment="Center"
+                                               Foreground="{DynamicResource TertiaryText}" FontSize="10" Margin="8,0,4,0"/>
+                                    <TextBox x:Name="RedThreshold" Grid.Column="3" Text="80"
+                                             Background="{DynamicResource ControlBackground}" Foreground="{DynamicResource PrimaryText}"
+                                             BorderBrush="{DynamicResource ControlBorder}" Padding="4,2" FontSize="10"
+                                             ToolTip="Usage percentage where the bar turns red (danger)"
+                                             TextChanged="LayoutSetting_TextChanged"/>
+                                </Grid>
+                            </StackPanel>
+
+                            <!-- Right: Data display options -->
+                            <StackPanel Grid.Column="2">
+                                <TextBlock Text="Data Display" FontWeight="Bold" FontSize="12"
+                                           Foreground="{DynamicResource PrimaryText}"/>
+                                <TextBlock Text="What information is shown on each card"
+                                           FontSize="9" Foreground="{DynamicResource TertiaryText}" Margin="0,1,0,6"/>
+
+                                <CheckBox x:Name="ShowUsedPercentagesCheck" Content="Show used percentages"
+                                          Foreground="{DynamicResource SecondaryText}" FontSize="11"
+                                          ToolTip="Display &quot;45% used&quot; instead of &quot;55% remaining&quot;.&#x0a;Also affects the progress bar direction."
+                                          Checked="LayoutSetting_Changed" Unchecked="LayoutSetting_Changed" Margin="0,2"/>
+                                <CheckBox x:Name="ShowUsagePerHourCheck" Content="Show usage rate"
+                                          Foreground="{DynamicResource SecondaryText}" FontSize="11"
+                                          ToolTip="Adds a requests-per-hour badge (e.g. &quot;12.5/hr&quot;) to each card.&#x0a;Requires the Usage Rate slot to be assigned below."
+                                          Checked="LayoutSetting_Changed" Unchecked="LayoutSetting_Changed" Margin="0,2"/>
+                                <CheckBox x:Name="UseRelativeResetTimeCheck" Content="Relative reset times"
+                                          Foreground="{DynamicResource SecondaryText}" FontSize="11"
+                                          ToolTip="Show reset time as a countdown (e.g. &quot;2d 15h&quot;)&#x0a;instead of an absolute time (e.g. &quot;Saturday 17:44&quot;)."
+                                          Checked="LayoutSetting_Changed" Unchecked="LayoutSetting_Changed" Margin="0,2"/>
+                            </StackPanel>
+                        </Grid>
+
+                        <!-- Section 2: Card Content (slots + presets) -->
+                        <Border Grid.Row="1" Height="1" Background="{DynamicResource BorderColor}" Margin="0,10,0,8"/>
+                        <StackPanel Grid.Row="2">
+                            <TextBlock Text="Card Content Slots" FontWeight="Bold" FontSize="12"
+                                       Foreground="{DynamicResource PrimaryText}"/>
+                            <TextBlock Text="Choose what data appears in each position on the card (right side, left to right)"
+                                       FontSize="9" Foreground="{DynamicResource TertiaryText}" Margin="0,1,0,6"/>
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="12"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                </Grid.RowDefinitions>
+
+                                <Grid Grid.Column="0" Grid.Row="0" Margin="0,2"
+                                      ToolTip="Main badge shown on the right side of the card.&#x0a;Typically a pace indicator or usage percentage.">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="100"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="Primary Badge" Foreground="{DynamicResource SecondaryText}" VerticalAlignment="Center" FontSize="11"/>
+                                    <ComboBox x:Name="PrimaryBadgeSlot" Grid.Column="1" Height="24"
+                                              Background="{DynamicResource ControlBackground}" Foreground="{DynamicResource PrimaryText}"
+                                              BorderBrush="{DynamicResource ControlBorder}" SelectionChanged="CardSlotConfig_Changed"/>
+                                </Grid>
+
+                                <Grid Grid.Column="2" Grid.Row="0" Margin="0,2"
+                                      ToolTip="Secondary badge next to the primary.&#x0a;Good for usage rate or projected percentage.">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="100"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="Secondary Badge" Foreground="{DynamicResource SecondaryText}" VerticalAlignment="Center" FontSize="11"/>
+                                    <ComboBox x:Name="SecondaryBadgeSlot" Grid.Column="1" Height="24"
+                                              Background="{DynamicResource ControlBackground}" Foreground="{DynamicResource PrimaryText}"
+                                              BorderBrush="{DynamicResource ControlBorder}" SelectionChanged="CardSlotConfig_Changed"/>
+                                </Grid>
+
+                                <Grid Grid.Column="0" Grid.Row="1" Margin="0,2"
+                                      ToolTip="Status text shown between the provider name and badges.&#x0a;Usually the remaining/used percentage or description.">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="100"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="Status Line" Foreground="{DynamicResource SecondaryText}" VerticalAlignment="Center" FontSize="11"/>
+                                    <ComboBox x:Name="StatusLineSlot" Grid.Column="1" Height="24"
+                                              Background="{DynamicResource ControlBackground}" Foreground="{DynamicResource PrimaryText}"
+                                              BorderBrush="{DynamicResource ControlBorder}" SelectionChanged="CardSlotConfig_Changed"/>
+                                </Grid>
+
+                                <Grid Grid.Column="2" Grid.Row="1" Margin="0,2"
+                                      ToolTip="Reset time display on the far right.&#x0a;Shows when the quota window resets.">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="100"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="Reset Info" Foreground="{DynamicResource SecondaryText}" VerticalAlignment="Center" FontSize="11"/>
+                                    <ComboBox x:Name="ResetInfoSlot" Grid.Column="1" Height="24"
+                                              Background="{DynamicResource ControlBackground}" Foreground="{DynamicResource PrimaryText}"
+                                              BorderBrush="{DynamicResource ControlBorder}" SelectionChanged="CardSlotConfig_Changed"/>
+                                </Grid>
+                            </Grid>
+
+                            <!-- Presets -->
+                            <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+                                <TextBlock Text="Presets:" Foreground="{DynamicResource TertiaryText}" VerticalAlignment="Center"
+                                           Margin="0,0,8,0" FontSize="11"/>
+                                <Button Content="Compact" Click="CardPresetCompact_Click" Padding="8,3" Margin="0,0,4,0"
+                                        ToolTip="Used % + Reset time only"
+                                        Background="{DynamicResource ButtonBackground}" Foreground="{DynamicResource PrimaryText}"
+                                        BorderBrush="{DynamicResource ControlBorder}" BorderThickness="1" MinWidth="50" MinHeight="22" FontSize="10" Cursor="Hand"/>
+                                <Button Content="Detailed" Click="CardPresetDetailed_Click" Padding="8,3" Margin="0,0,4,0"
+                                        ToolTip="Pace badge + Usage rate + Status + Reset time"
+                                        Background="{DynamicResource ButtonBackground}" Foreground="{DynamicResource PrimaryText}"
+                                        BorderBrush="{DynamicResource ControlBorder}" BorderThickness="1" MinWidth="50" MinHeight="22" FontSize="10" Cursor="Hand"/>
+                                <Button Content="Pace Focus" Click="CardPresetPace_Click" Padding="8,3" Margin="0,0,12,0"
+                                        ToolTip="Pace badge + Projected % + Daily budget + Reset time"
+                                        Background="{DynamicResource ButtonBackground}" Foreground="{DynamicResource PrimaryText}"
+                                        BorderBrush="{DynamicResource ControlBorder}" BorderThickness="1" MinWidth="50" MinHeight="22" FontSize="10" Cursor="Hand"/>
+                                <ComboBox x:Name="UserPresetCombo" Width="120" Height="22"
+                                          ToolTip="Your saved slot configurations"
+                                          Background="{DynamicResource ControlBackground}" Foreground="{DynamicResource PrimaryText}"
+                                          BorderBrush="{DynamicResource ControlBorder}" FontSize="10"
+                                          SelectionChanged="CardUserPresetCombo_SelectionChanged"/>
+                                <Button Content="Save" Click="CardSavePresetBtn_Click" Padding="6,2" Margin="4,0,0,0"
+                                        ToolTip="Save current slot configuration as a named preset"
+                                        Background="{DynamicResource ButtonBackground}" Foreground="{DynamicResource PrimaryText}"
+                                        BorderBrush="{DynamicResource ControlBorder}" BorderThickness="1" MinWidth="40" MinHeight="22" FontSize="10" Cursor="Hand"/>
+                                <Button Content="Del" Click="CardDeletePresetBtn_Click" Padding="6,2" Margin="4,0,0,0"
+                                        ToolTip="Delete the selected preset"
+                                        Background="{DynamicResource ButtonBackground}" Foreground="{DynamicResource PrimaryText}"
+                                        BorderBrush="{DynamicResource ControlBorder}" BorderThickness="1" MinWidth="30" MinHeight="22" FontSize="10" Cursor="Hand"/>
+                            </StackPanel>
+                        </StackPanel>
+
+                        <!-- Section 3: Live Preview -->
+                        <Border Grid.Row="3" Height="1" Background="{DynamicResource BorderColor}" Margin="0,8,0,6"/>
+                        <ScrollViewer Grid.Row="4" VerticalScrollBarVisibility="Auto">
+                            <StackPanel x:Name="CardPreviewStack"/>
+                        </ScrollViewer>
+                    </Grid>
+                </TabItem>
+
+                <TabItem Header="Layout">
+                    <StackPanel Margin="20,15,20,15">
+                        <!-- Window Behavior -->
+                        <TextBlock Text="Window Behavior" FontWeight="Bold" FontSize="12"
+                                   Foreground="{DynamicResource PrimaryText}" Margin="0,0,0,10"/>
+                         <CheckBox x:Name="AlwaysOnTopCheck" Content="Always On Top" IsChecked="False"
+                                  Margin="0,4" Foreground="{DynamicResource SecondaryText}"
+                                  Checked="LayoutSetting_Changed" Unchecked="LayoutSetting_Changed"/>
+                        <CheckBox x:Name="AggressiveTopmostCheck" Content="Aggressive keep-on-top"
+                                  Margin="0,4" Foreground="{DynamicResource SecondaryText}"
+                                  ToolTip="Reassert topmost more aggressively after losing activation (may steal focus)."
+                                  Checked="LayoutSetting_Changed" Unchecked="LayoutSetting_Changed"/>
+                        <CheckBox x:Name="ForceWin32TopmostCheck" Content="Force Win32 topmost"
+                                  Margin="0,4" Foreground="{DynamicResource SecondaryText}"
+                                  ToolTip="Uses native SetWindowPos topmost reassertion without activating the window."
+                                  Checked="LayoutSetting_Changed" Unchecked="LayoutSetting_Changed"/>
+
+                        <Border Height="1" Background="{DynamicResource BorderColor}" Margin="0,12,0,12"/>
+
+                        <!-- Startup -->
+                        <TextBlock Text="Startup" FontWeight="Bold" FontSize="12"
+                                   Foreground="{DynamicResource PrimaryText}" Margin="0,0,0,10"/>
+                        <CheckBox x:Name="StartUiWithWindowsCheck" Content="Start with Windows"
+                                  Margin="0,4" Foreground="{DynamicResource SecondaryText}"
+                                  ToolTip="Automatically start the application when Windows starts. The Monitor will start automatically with the UI."
+                                  Checked="LayoutSetting_Changed" Unchecked="LayoutSetting_Changed"/>
+
+                        <Grid Margin="0,10,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="200"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="Theme" VerticalAlignment="Center"
+                                       Foreground="{DynamicResource SecondaryText}" Margin="0,0,10,0"/>
+                            <ComboBox x:Name="ThemeCombo" Grid.Column="1" Height="24"
+                                      SelectionChanged="ThemeCombo_SelectionChanged"
+                                      Background="{DynamicResource ControlBackground}"
+                                      Foreground="{DynamicResource PrimaryText}"
+                                      BorderBrush="{DynamicResource ControlBorder}"/>
+                        </Grid>
+
+                        <Border Height="1" Background="{DynamicResource BorderColor}" Margin="0,15,0,15"/>
+
+                        <!-- Font -->
+                        <TextBlock Text="Font" FontWeight="Bold" FontSize="12"
+                                   Foreground="{DynamicResource PrimaryText}" Margin="0,0,0,10"/>
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="10"/>
+                                <ColumnDefinition Width="80"/>
+                                <ColumnDefinition Width="10"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <ComboBox x:Name="FontFamilyCombo" Grid.Column="0" Height="24"
+                                      SelectionChanged="FontFamilyCombo_SelectionChanged"
+                                      Background="{DynamicResource ControlBackground}"
+                                      Foreground="{DynamicResource PrimaryText}"
+                                      BorderBrush="{DynamicResource ControlBorder}"/>
+                            <TextBox x:Name="FontSizeBox" Grid.Column="2" Text="12"
+                                     TextChanged="FontSizeBox_TextChanged"
+                                     Background="{DynamicResource ControlBackground}"
+                                     Foreground="{DynamicResource PrimaryText}"
+                                     BorderBrush="{DynamicResource ControlBorder}"
+                                     Padding="6,4" VerticalContentAlignment="Center"/>
+                            <StackPanel Grid.Column="4" Orientation="Horizontal" VerticalAlignment="Center">
+                                <CheckBox x:Name="FontBoldCheck" Content="B" FontWeight="Bold"
+                                          Checked="FontBoldCheck_CheckedChanged" Unchecked="FontBoldCheck_CheckedChanged"
+                                          Margin="0,0,8,0" Foreground="{DynamicResource SecondaryText}"/>
+                                <CheckBox x:Name="FontItalicCheck" Content="I" FontStyle="Italic"
+                                          Checked="FontItalicCheck_CheckedChanged" Unchecked="FontItalicCheck_CheckedChanged"
+                                          Foreground="{DynamicResource SecondaryText}"/>
+                            </StackPanel>
+                        </Grid>
+                        <Border Background="{DynamicResource CardBackground}"
+                                BorderBrush="{DynamicResource CardBorder}"
+                                BorderThickness="1" CornerRadius="4"
+                                Padding="10" Margin="0,8,0,0">
+                            <DockPanel>
+                                <Button x:Name="ResetFontBtn" DockPanel.Dock="Right" Content="Reset"
+                                        Click="ResetFontBtn_Click" Padding="8,4" MinWidth="50" MinHeight="23"
+                                        Background="{DynamicResource ButtonBackground}"
+                                        Foreground="{DynamicResource PrimaryText}"
+                                        BorderBrush="{DynamicResource ControlBorder}" BorderThickness="1"
+                                        VerticalAlignment="Center" Margin="10,0,0,0"/>
+                                <TextBlock x:Name="FontPreviewText"
+                                           Text="The quick brown fox jumps over the lazy dog."
+                                           Foreground="{DynamicResource PrimaryText}"
+                                           VerticalAlignment="Center"/>
+                            </DockPanel>
+                        </Border>
+                    </StackPanel>
+                </TabItem>
+
+                <!-- Notifications Tab -->
+                <TabItem Header="Notifications">
+                    <ScrollViewer Padding="0" VerticalScrollBarVisibility="Auto">
+                        <StackPanel Margin="20,15,20,15">
+
+                            <!-- Two-column: Settings + Event Types -->
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="20"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+
+                                <!-- Left: General -->
+                                <StackPanel Grid.Column="0">
+                                    <TextBlock Text="Notifications" FontWeight="Bold" FontSize="12"
+                                               Foreground="{DynamicResource PrimaryText}" Margin="0,0,0,10"/>
+                                    <CheckBox x:Name="EnableWindowsNotificationsCheck"
+                                              Content="Enable notifications"
+                                              Margin="0,4" Foreground="{DynamicResource SecondaryText}"
+                                              Checked="EnableWindowsNotificationsCheck_Changed"
+                                              Unchecked="EnableWindowsNotificationsCheck_Changed"/>
+                                    <Grid Margin="0,8,0,0">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto"/>
+                                            <ColumnDefinition Width="*"/>
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="Threshold %" VerticalAlignment="Center"
+                                                   Foreground="{DynamicResource SecondaryText}" Margin="0,0,8,0"/>
+                                        <TextBox x:Name="NotificationThresholdBox" Grid.Column="1" Text="90"
+                                                 Background="{DynamicResource ControlBackground}"
+                                                 Foreground="{DynamicResource PrimaryText}"
+                                                 BorderBrush="{DynamicResource ControlBorder}" Padding="6,4"
+                                                 TextChanged="LayoutSetting_TextChanged"/>
+                                    </Grid>
+                                </StackPanel>
+
+                                <!-- Right: Event Types -->
+                                <StackPanel Grid.Column="2">
+                                    <TextBlock Text="Event Types" FontWeight="Bold" FontSize="12"
+                                               Foreground="{DynamicResource PrimaryText}" Margin="0,0,0,10"/>
+                                    <CheckBox x:Name="NotifyUsageThresholdCheck" Content="Usage threshold reached"
+                                              Margin="0,4" Foreground="{DynamicResource SecondaryText}"
+                                              Checked="LayoutSetting_Changed" Unchecked="LayoutSetting_Changed"/>
+                                    <CheckBox x:Name="NotifyQuotaExceededCheck" Content="Quota exceeded / reset"
+                                              Margin="0,4" Foreground="{DynamicResource SecondaryText}"
+                                              Checked="LayoutSetting_Changed" Unchecked="LayoutSetting_Changed"/>
+                                    <CheckBox x:Name="NotifyProviderErrorsCheck" Content="Provider errors (soon)"
+                                              Margin="0,4" Foreground="{DynamicResource SecondaryText}"
+                                              IsEnabled="False"/>
+                                </StackPanel>
+                            </Grid>
+
+                            <Border Height="1" Background="{DynamicResource BorderColor}" Margin="0,15,0,15"/>
+
+                            <!-- Quiet Hours -->
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="20"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="8"/>
+                                    <ColumnDefinition Width="80"/>
+                                    <ColumnDefinition Width="15"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="8"/>
+                                    <ColumnDefinition Width="80"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <CheckBox x:Name="EnableQuietHoursCheck" Content="Quiet hours"
+                                          Grid.Column="0" VerticalAlignment="Center"
+                                          Foreground="{DynamicResource SecondaryText}"
+                                          Checked="EnableWindowsNotificationsCheck_Changed"
+                                          Unchecked="EnableWindowsNotificationsCheck_Changed"/>
+                                <TextBlock Text="From" Grid.Column="2" VerticalAlignment="Center"
+                                           Foreground="{DynamicResource TertiaryText}"/>
+                                <TextBox x:Name="QuietHoursStartBox" Grid.Column="4" Text="22:00"
+                                         Background="{DynamicResource ControlBackground}"
+                                         Foreground="{DynamicResource PrimaryText}"
+                                         BorderBrush="{DynamicResource ControlBorder}" Padding="6,4"
+                                         TextChanged="LayoutSetting_TextChanged"/>
+                                <TextBlock Text="To" Grid.Column="6" VerticalAlignment="Center"
+                                           Foreground="{DynamicResource TertiaryText}"/>
+                                <TextBox x:Name="QuietHoursEndBox" Grid.Column="8" Text="07:00"
+                                         Background="{DynamicResource ControlBackground}"
+                                         Foreground="{DynamicResource PrimaryText}"
+                                         BorderBrush="{DynamicResource ControlBorder}" Padding="6,4"
+                                         TextChanged="LayoutSetting_TextChanged"/>
+                            </Grid>
+
+                            <Border Height="1" Background="{DynamicResource BorderColor}" Margin="0,15,0,15"/>
+
+                            <!-- Test -->
+                            <DockPanel>
+                                <TextBlock x:Name="NotificationTestStatusText" DockPanel.Dock="Right"
+                                           VerticalAlignment="Center" Foreground="{DynamicResource TertiaryText}" FontSize="11"/>
+                                <Button Content="Send Test Notification" Click="SendTestNotificationBtn_Click"
+                                        Padding="12,6" MinWidth="75" MinHeight="23"
+                                        Background="{DynamicResource ButtonBackground}"
+                                        Foreground="{DynamicResource PrimaryText}"
+                                        BorderBrush="{DynamicResource ControlBorder}" BorderThickness="1"
+                                        HorizontalAlignment="Left" Cursor="Hand"/>
+                            </DockPanel>
+
+                            <TextBlock Text="Provider-level notify toggles in the Providers tab also apply."
+                                       FontSize="10" Margin="0,10,0,0" Foreground="{DynamicResource TertiaryText}"/>
+                        </StackPanel>
+                    </ScrollViewer>
+                </TabItem>
+
+                <!-- History Tab -->
+                <TabItem Header="History">
+                    <Grid Margin="20,15,20,15">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="*"/>
+                        </Grid.RowDefinitions>
+
+                        <StackPanel x:Name="HistoryStack" Grid.Row="0">
+                            <DockPanel Margin="0,0,0,10">
+                                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                                    <Button Content="Refresh" Click="RefreshHistoryBtn_Click"
+                                            Padding="12,6" MinWidth="75" MinHeight="23" Margin="0,0,8,0"
+                                            Background="{DynamicResource ButtonBackground}"
+                                            Foreground="{DynamicResource PrimaryText}"
+                                            BorderBrush="{DynamicResource ControlBorder}" BorderThickness="1" Cursor="Hand"/>
+                                    <Button Content="Clear" Click="ClearHistoryBtn_Click"
+                                            Padding="12,6" MinWidth="75" MinHeight="23"
+                                            Background="{DynamicResource ButtonBackground}"
+                                            Foreground="{DynamicResource PrimaryText}"
+                                            BorderBrush="{DynamicResource ControlBorder}" BorderThickness="1" Cursor="Hand"/>
+                                </StackPanel>
+                                <StackPanel>
+                                    <TextBlock Text="Usage History" FontWeight="Bold" FontSize="12"
+                                               Foreground="{DynamicResource PrimaryText}"/>
+                                    <TextBlock Text="Raw data from the monitor (last 24 hours)"
+                                               FontSize="10" Foreground="{DynamicResource TertiaryText}" Margin="0,2,0,0"/>
+                                </StackPanel>
+                            </DockPanel>
+                        </StackPanel>
+                            
+                        <Border Grid.Row="1" Background="{DynamicResource CardBackground}"
+                                BorderBrush="{DynamicResource CardBorder}"
+                                BorderThickness="1" CornerRadius="4">
+                            <DataGrid x:Name="HistoryDataGrid"
+                                      AutoGenerateColumns="False"
+                                      HeadersVisibility="Column"
+                                      GridLinesVisibility="Horizontal"
+                                      Background="Transparent"
+                                      RowBackground="{DynamicResource CardBackground}"
+                                      AlternatingRowBackground="{DynamicResource ControlBackground}"
+                                      BorderThickness="0"
+                                      IsReadOnly="True"
+                                      CanUserAddRows="False"
+                                      CanUserDeleteRows="False"
+                                      CanUserReorderColumns="True"
+                                      CanUserResizeColumns="True"
+                                      CanUserSortColumns="True"
+                                      VirtualizingPanel.IsVirtualizing="True"
+                                      VirtualizingPanel.VirtualizationMode="Recycling"
+                                      EnableRowVirtualization="True">
+                                <DataGrid.Columns>
+                                    <DataGridTextColumn Header="Provider" Binding="{Binding ProviderName}" Width="120"/>
+                                    <DataGridTextColumn Header="Usage %" Binding="{Binding UsagePercentage, StringFormat=F1}" Width="70"/>
+                                    <DataGridTextColumn Header="Cost Used" Binding="{Binding Used, StringFormat=F2}" Width="80"/>
+                                    <DataGridTextColumn Header="Cost Limit" Binding="{Binding Limit, StringFormat=F2}" Width="80"/>
+                                    <DataGridTextColumn Header="Type" Binding="{Binding PlanType}" Width="80"/>
+                                    <DataGridTextColumn Header="Status" Binding="{Binding Description}" Width="150"/>
+                                    <DataGridTextColumn Header="Fetched At" Binding="{Binding FetchedAt, StringFormat=yyyy-MM-dd HH:mm:ss}" Width="140"/>
+                                </DataGrid.Columns>
+                            </DataGrid>
+                        </Border>
+                    </Grid>
+                </TabItem>
+
+                <!-- Data Tab -->
+                <!-- Data tab removed — export/backup buttons moved to Monitor tab -->
+
+                <!-- Monitor Tab -->
+                <TabItem Header="Monitor">
+                    <Grid Margin="20,15,20,15">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="*"/>
+                        </Grid.RowDefinitions>
+
+                        <StackPanel x:Name="MonitorStack" Grid.Row="0">
+                            <!-- Status + Actions on one line -->
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="20"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+
+                                <!-- Left: Status -->
+                                <StackPanel Grid.Column="0">
+                                    <TextBlock Text="Status" FontWeight="Bold" FontSize="12"
+                                               Foreground="{DynamicResource PrimaryText}" Margin="0,0,0,10"/>
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto"/>
+                                            <ColumnDefinition Width="*"/>
+                                        </Grid.ColumnDefinitions>
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="Auto"/>
+                                        </Grid.RowDefinitions>
+                                        <TextBlock Text="Status:" Foreground="{DynamicResource SecondaryText}"
+                                                   Margin="0,0,8,4"/>
+                                        <TextBlock x:Name="MonitorStatusText" Text="Checking..."
+                                                   Foreground="{DynamicResource PrimaryText}" Grid.Column="1"/>
+                                        <TextBlock Text="Port:" Grid.Row="1" Foreground="{DynamicResource SecondaryText}"
+                                                   Margin="0,0,8,0"/>
+                                        <TextBlock x:Name="MonitorPortText" Text="5000" Grid.Row="1" Grid.Column="1"
+                                                   Foreground="{DynamicResource PrimaryText}"/>
+                                    </Grid>
+
+
+                                </StackPanel>
+
+                                <!-- Right: Actions -->
+                                <StackPanel Grid.Column="2">
+                                    <TextBlock Text="Actions" FontWeight="Bold" FontSize="12"
+                                               Foreground="{DynamicResource PrimaryText}" Margin="0,0,0,10"/>
+                                    <Button Content="Restart Monitor" Click="RestartMonitorBtn_Click"
+                                            Padding="12,6" MinWidth="75" MinHeight="23" Margin="0,0,0,4"
+                                            HorizontalAlignment="Stretch"
+                                            Background="{DynamicResource ButtonBackground}"
+                                            Foreground="{DynamicResource PrimaryText}"
+                                            BorderBrush="{DynamicResource ControlBorder}" BorderThickness="1" Cursor="Hand"/>
+                                    <Button Content="Check Health" Click="CheckHealthBtn_Click"
+                                            Padding="12,6" MinWidth="75" MinHeight="23" Margin="0,0,0,4"
+                                            HorizontalAlignment="Stretch"
+                                            Background="{DynamicResource ButtonBackground}"
+                                            Foreground="{DynamicResource PrimaryText}"
+                                            BorderBrush="{DynamicResource ControlBorder}" BorderThickness="1" Cursor="Hand"/>
+                                    <Button Content="Export Diagnostics" Click="ExportDiagnosticsBtn_Click"
+                                            Padding="12,6" MinWidth="75" MinHeight="23" Margin="0,0,0,4"
+                                            HorizontalAlignment="Stretch"
+                                            Background="{DynamicResource ButtonBackground}"
+                                            Foreground="{DynamicResource PrimaryText}"
+                                            BorderBrush="{DynamicResource ControlBorder}" BorderThickness="1" Cursor="Hand"/>
+
+                                    <TextBlock Text="Data" FontWeight="Bold" FontSize="12"
+                                               Foreground="{DynamicResource PrimaryText}" Margin="0,10,0,10"/>
+                                    <Button x:Name="ExportCsvBtn" Content="Export CSV" Click="ExportCsvBtn_Click"
+                                            Padding="12,6" MinWidth="75" MinHeight="23" Margin="0,0,0,4"
+                                            HorizontalAlignment="Stretch"
+                                            Background="{DynamicResource ButtonBackground}"
+                                            Foreground="{DynamicResource PrimaryText}"
+                                            BorderBrush="{DynamicResource ControlBorder}" BorderThickness="1" Cursor="Hand"/>
+                                    <Button x:Name="ExportJsonBtn" Content="Export JSON" Click="ExportJsonBtn_Click"
+                                            Padding="12,6" MinWidth="75" MinHeight="23" Margin="0,0,0,4"
+                                            HorizontalAlignment="Stretch"
+                                            Background="{DynamicResource ButtonBackground}"
+                                            Foreground="{DynamicResource PrimaryText}"
+                                            BorderBrush="{DynamicResource ControlBorder}" BorderThickness="1" Cursor="Hand"/>
+                                    <Button x:Name="BackupDbBtn" Content="Backup Database" Click="BackupDbBtn_Click"
+                                            Padding="12,6" MinWidth="75" MinHeight="23"
+                                            HorizontalAlignment="Stretch"
+                                            Background="{DynamicResource ButtonBackground}"
+                                            Foreground="{DynamicResource PrimaryText}"
+                                            BorderBrush="{DynamicResource ControlBorder}" BorderThickness="1" Cursor="Hand"/>
+                                </StackPanel>
+                            </Grid>
+                        </StackPanel>
+
+                        <Border Grid.Row="1" Height="1" Background="{DynamicResource BorderColor}" Margin="0,15,0,10"/>
+
+                        <TextBlock Grid.Row="2" Text="Logs" FontWeight="Bold" FontSize="12"
+                                   Foreground="{DynamicResource PrimaryText}" Margin="0,0,0,8"/>
+
+                        <Border Grid.Row="3" Background="{DynamicResource ControlBackground}"
+                                BorderBrush="{DynamicResource ControlBorder}"
+                                BorderThickness="1" CornerRadius="4">
+                            <TextBox x:Name="MonitorLogsText"
+                                     IsReadOnly="True" Background="Transparent"
+                                     Foreground="{DynamicResource SecondaryText}"
+                                     FontFamily="Consolas" FontSize="10"
+                                     Padding="8" TextWrapping="Wrap"
+                                     VerticalScrollBarVisibility="Auto"/>
+                        </Border>
+                    </Grid>
+                </TabItem>
+
+                <!-- Updates Tab -->
+                <TabItem Header="Updates">
+                    <StackPanel Margin="20,15,20,15">
+                        <TextBlock Text="Update Channel" FontWeight="Bold" FontSize="12"
+                                   Foreground="{DynamicResource PrimaryText}" Margin="0,0,0,10"/>
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="200"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="Channel" VerticalAlignment="Center"
+                                       Foreground="{DynamicResource SecondaryText}" Margin="0,0,10,0"/>
+                            <ComboBox x:Name="UpdateChannelCombo" Grid.Column="1" Height="24"
+                                      SelectionChanged="UpdateChannelCombo_SelectionChanged"
+                                      Background="{DynamicResource ControlBackground}"
+                                      Foreground="{DynamicResource PrimaryText}"
+                                      BorderBrush="{DynamicResource ControlBorder}"/>
+                        </Grid>
+                        <TextBlock FontSize="10" Foreground="{DynamicResource TertiaryText}" Margin="0,10,0,0"
+                                   TextWrapping="Wrap"
+                                   Text="Stable = well-tested releases. Beta = early access, may have bugs."/>
+
+                        <StackPanel Orientation="Horizontal" Margin="0,15,0,0">
+                            <Button x:Name="CheckForUpdatesBtn" Content="Check for Updates"
+                                    Click="CheckForUpdatesBtn_Click"
+                                    Padding="12,4" Height="26"
+                                    Background="{DynamicResource ControlBackground}"
+                                    Foreground="{DynamicResource PrimaryText}"
+                                    BorderBrush="{DynamicResource ControlBorder}"/>
+                            <TextBlock x:Name="UpdateCheckStatus" VerticalAlignment="Center"
+                                       Margin="12,0,0,0" FontSize="11"
+                                       Foreground="{DynamicResource SecondaryText}"/>
+                            <Button x:Name="DownloadUpdateBtn" Content="Download &amp; Install"
+                                    Click="DownloadUpdateBtn_Click"
+                                    Visibility="Collapsed"
+                                    Padding="12,4" Height="26" Margin="8,0,0,0"
+                                    Background="{DynamicResource AccentColor}"
+                                    Foreground="{DynamicResource AccentForeground}"
+                                    BorderBrush="{DynamicResource AccentColor}"
+                                    Cursor="Hand"/>
+                        </StackPanel>
+                    </StackPanel>
+                </TabItem>
+            </TabControl>
+
+            <!-- Footer -->
+            <Border Grid.Row="2" Background="{DynamicResource FooterBackground}" Padding="12,8">
+                <DockPanel>
+                    <StackPanel Orientation="Horizontal" DockPanel.Dock="Left">
+                        <Button x:Name="ScanBtn" Content="Scan for Keys" Click="ScanBtn_Click" 
+                                ToolTip="Search common locations for API keys" 
+                                Padding="10,5" Background="{DynamicResource ButtonBackground}"
+                                Foreground="{DynamicResource PrimaryText}"
+                                Margin="0,0,10,0"/>
+                        <Button x:Name="RefreshBtn" Content="Refresh Data" Click="RefreshBtn_Click" 
+                                ToolTip="Trigger data refresh from providers"
+                                Padding="10,5" Background="{DynamicResource ButtonBackground}"
+                                Foreground="{DynamicResource PrimaryText}"/>
+                    </StackPanel>
+                    
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                        <Button Content="Close" Click="CancelBtn_Click" Padding="10,5"
+                                Background="{DynamicResource ButtonBackground}"
+                                Foreground="{DynamicResource PrimaryText}"/>
+                    </StackPanel>
+                </DockPanel>
+            </Border>
+        </Grid>
+    </Border>
+</Window>

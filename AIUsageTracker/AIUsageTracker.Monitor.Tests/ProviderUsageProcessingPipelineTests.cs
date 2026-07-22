@@ -1,0 +1,674 @@
+// <copyright file="ProviderUsageProcessingPipelineTests.cs" company="AIUsageTracker">
+// Copyright (c) AIUsageTracker. All rights reserved.
+// </copyright>
+
+using AIUsageTracker.Core.Models;
+using AIUsageTracker.Infrastructure.Providers;
+using AIUsageTracker.Monitor.Services;
+using AIUsageTracker.Core.Providers;
+using Microsoft.Extensions.Logging;
+using Moq;
+
+namespace AIUsageTracker.Monitor.Tests;
+
+public class ProviderUsageProcessingPipelineTests
+{
+    private readonly ProviderUsageProcessingPipeline _pipeline;
+
+    public ProviderUsageProcessingPipelineTests()
+    {
+        var logger = new Mock<ILogger<ProviderUsageProcessingPipeline>>();
+        this._pipeline = new ProviderUsageProcessingPipeline(logger.Object);
+    }
+
+    [Fact]
+    public void Process_WhenUsageIsAvailable_PassesThroughUnchanged()
+    {
+        // With flat cards, the detail contract stage is a no-op.
+        // This test verifies a valid usage passes through the pipeline correctly.
+        var usage = new WindowedProviderUsage
+        {
+            ProviderId = "openai",
+            ProviderName = "OpenAI",
+            RequestsUsed = 10,
+            RequestsAvailable = 100,
+            UsedPercent = 10,
+            IsAvailable = true,
+            WindowKind = WindowKind.Burst,
+            HttpStatus = 200,
+        };
+
+        var result = this._pipeline.Process(
+            new[] { usage },
+            new[] { "openai" },
+            isPrivacyMode: false);
+
+        var processed = (WindowedProviderUsage)Assert.Single(result.Usages);
+        Assert.True(processed.IsAvailable);
+        Assert.Equal(WindowKind.Burst, processed.WindowKind);
+        Assert.Equal(0, result.DetailContractAdjustedCount);
+    }
+
+    [Fact]
+    public void Process_WhenHttpStatusIsSuccess_MarksUpstreamResponseValid()
+    {
+        var usage = new WindowedProviderUsage
+        {
+            ProviderId = "openai",
+            ProviderName = "OpenAI",
+            IsAvailable = true,
+            Description = "Connected",
+            HttpStatus = 200,
+        };
+
+        var result = this._pipeline.Process(
+            new[] { usage },
+            new[] { "openai" },
+            isPrivacyMode: false);
+
+        var processed = Assert.Single(result.Usages);
+        Assert.Equal(UpstreamResponseValidity.Valid, processed.UpstreamResponseValidity);
+        Assert.Equal("HTTP 200", processed.UpstreamResponseNote);
+    }
+
+    [Fact]
+    public void Process_WhenNoUpstreamMetadata_MarksResponseAsNotAttempted()
+    {
+        var usage = new WindowedProviderUsage
+        {
+            ProviderId = "antigravity",
+            ProviderName = "Antigravity",
+            IsAvailable = false,
+            Description = "Application not running",
+            HttpStatus = 0,
+            RawJson = null,
+        };
+
+        var result = this._pipeline.Process(
+            new[] { usage },
+            new[] { "antigravity" },
+            isPrivacyMode: false);
+
+        var processed = Assert.Single(result.Usages);
+        Assert.Equal(UpstreamResponseValidity.NotAttempted, processed.UpstreamResponseValidity);
+    }
+
+    [Fact]
+    public void Process_WhenUnavailableWithDescription_KeepsUsage()
+    {
+        // Missing/Unavailable entries with a description are actionable
+        // (e.g. "API Key missing", "auth token not found") and must reach
+        // the DB so the UI can show them instead of stale cached data.
+        var usage = new WindowedProviderUsage
+        {
+            ProviderId = "openrouter",
+            ProviderName = "OpenRouter",
+            RequestsUsed = 0,
+            RequestsAvailable = 0,
+            UsedPercent = 0,
+            IsAvailable = false,
+            State = ProviderUsageState.Missing,
+            Description = "API Key missing",
+        };
+
+        var result = this._pipeline.Process(
+            new[] { usage },
+            new[] { "openrouter" },
+            isPrivacyMode: false);
+
+        var kept = Assert.Single(result.Usages);
+        Assert.Equal("API Key missing", kept.Description);
+        Assert.Equal(0, result.PlaceholderFilteredCount);
+    }
+
+    [Fact]
+    public void Process_WhenUnavailableWithNoDescription_DropsUsage()
+    {
+        // Truly empty entries (no description, no quota data) are placeholders
+        // and should not pollute the DB or UI.
+        var usage = new WindowedProviderUsage
+        {
+            ProviderId = "openrouter",
+            ProviderName = "OpenRouter",
+            RequestsUsed = 0,
+            RequestsAvailable = 0,
+            UsedPercent = 0,
+            IsAvailable = false,
+            State = ProviderUsageState.Missing,
+            Description = string.Empty,
+        };
+
+        var result = this._pipeline.Process(
+            new[] { usage },
+            new[] { "openrouter" },
+            isPrivacyMode: false);
+
+        Assert.Empty(result.Usages);
+        Assert.Equal(1, result.PlaceholderFilteredCount);
+    }
+
+    [Fact]
+    public void Process_WhenPrivacyModeEnabled_RedactsSensitiveFields()
+    {
+        var usage = new WindowedProviderUsage
+        {
+            ProviderId = "openrouter",
+            ProviderName = "OpenRouter",
+            RequestsUsed = 1,
+            RequestsAvailable = 10,
+            UsedPercent = 10,
+            IsAvailable = true,
+            AccountName = "user@example.com",
+            ConfigKey = "config-key",
+            RawJson = "{ \"secret\": \"value\" }",
+        };
+
+        var result = this._pipeline.Process(
+            new[] { usage },
+            new[] { "openrouter" },
+            isPrivacyMode: true);
+
+        var processed = Assert.Single(result.Usages);
+        Assert.Equal(string.Empty, processed.AccountName);
+        Assert.Equal(string.Empty, processed.ConfigKey);
+        Assert.Null(processed.RawJson);
+        Assert.Equal(1, result.PrivacyRedactedCount);
+    }
+
+    [Fact]
+    public void Process_WhenPercentageInvalid_NormalizesFromUsageValues()
+    {
+        var usage = new WindowedProviderUsage
+        {
+            ProviderId = "zai",
+            ProviderName = "Z.AI",
+            RequestsUsed = 30,
+            RequestsAvailable = 100,
+            UsedPercent = double.NaN,
+            IsQuotaBased = false,
+            IsAvailable = true,
+        };
+
+        var result = this._pipeline.Process(
+            new[] { usage },
+            new[] { "zai" },
+            isPrivacyMode: false);
+
+        var processed = (QuotaProviderUsage)Assert.Single(result.Usages);
+        Assert.Equal(30d, processed.UsedPercent);
+        Assert.True(result.NormalizedCount >= 1);
+    }
+
+    [Fact]
+    public void Process_WhenUsageIsDynamicChildOfActiveProvider_KeepsEntry()
+    {
+        var usage = new WindowedProviderUsage
+        {
+            ProviderId = "antigravity.claude-sonnet",
+            ProviderName = "Claude Sonnet",
+            RequestsUsed = 50,
+            RequestsAvailable = 100,
+            UsedPercent = 50,
+            IsAvailable = true,
+        };
+
+        var result = this._pipeline.Process(
+            new[] { usage },
+            new[] { "antigravity" },
+            isPrivacyMode: false);
+
+        Assert.Single(result.Usages);
+        Assert.Equal(0, result.InactiveProviderFilteredCount);
+    }
+
+    [Fact]
+    public void Process_WhenUsageIsCoReportedByActiveProvider_KeepsEntry()
+    {
+        var usage = new WindowedProviderUsage
+        {
+            ProviderId = "codex.spark",
+            ProviderName = "OpenAI (GPT-5.3 Codex Spark)",
+            RequestsUsed = 12,
+            RequestsAvailable = 100,
+            UsedPercent = 12,
+            IsAvailable = true,
+        };
+
+        var activeProviderIds = ProviderMetadataCatalog.ExpandAcceptedUsageProviderIds(new[] { "codex" });
+        var result = this._pipeline.Process(
+            new[] { usage },
+            activeProviderIds.ToArray(),
+            isPrivacyMode: false);
+
+        Assert.Single(result.Usages);
+        Assert.Equal(0, result.InactiveProviderFilteredCount);
+    }
+
+    [Fact]
+    public void Process_WhenUsageMatchesCanonicalProviderAlias_KeepsEntry()
+    {
+        var usage = new WindowedProviderUsage
+        {
+            ProviderId = "gemini-cli.hourly",
+            ProviderName = "Gemini CLI (Hourly)",
+            RequestsUsed = 20,
+            RequestsAvailable = 100,
+            UsedPercent = 80,
+            IsAvailable = true,
+        };
+
+        var result = this._pipeline.Process(
+            new[] { usage },
+            new[] { "gemini" },
+            isPrivacyMode: false);
+
+        var accepted = Assert.Single(result.Usages);
+        Assert.Equal("gemini-cli.hourly", accepted.ProviderId);
+        Assert.Equal(0, result.InactiveProviderFilteredCount);
+    }
+
+    [Fact]
+    public void Process_WhenFamilyMemberMissingAccountName_PropagatesCanonicalAccountIdentity()
+    {
+        var result = this._pipeline.Process(
+            new[]
+            {
+                new WindowedProviderUsage
+                {
+                    ProviderId = "gemini-cli.daily",
+                    ProviderName = "Gemini CLI (Daily)",
+                    RequestsUsed = 10,
+                    RequestsAvailable = 100,
+                    UsedPercent = 90,
+                    IsAvailable = true,
+                    AccountName = "alex@example.com",
+                },
+                new WindowedProviderUsage
+                {
+                    ProviderId = "gemini-cli.hourly",
+                    ProviderName = "Gemini CLI (Hourly)",
+                    RequestsUsed = 20,
+                    RequestsAvailable = 100,
+                    UsedPercent = 80,
+                    IsAvailable = true,
+                    AccountName = string.Empty,
+                },
+            },
+            new[] { "gemini" },
+            isPrivacyMode: false);
+
+        Assert.Equal(2, result.Usages.Count);
+        Assert.All(result.Usages, usage => Assert.Equal("alex@example.com", usage.AccountName));
+    }
+
+    [Fact]
+    public void Process_WhenUsageUsesUnsupportedDottedProviderId_FiltersInactiveEntry()
+    {
+        var usage = new WindowedProviderUsage
+        {
+            ProviderId = "openai.spark",
+            ProviderName = "Unexpected Child",
+            RequestsUsed = 20,
+            RequestsAvailable = 100,
+            UsedPercent = 20,
+            IsAvailable = true,
+        };
+
+        var result = this._pipeline.Process(
+            new[] { usage },
+            new[] { "openai" },
+            isPrivacyMode: false);
+
+        Assert.Empty(result.Usages);
+        Assert.Equal(1, result.InactiveProviderFilteredCount);
+    }
+
+    [Fact]
+    public void Process_WhenProviderIdMissing_FiltersInvalidIdentity()
+    {
+        var usage = new WindowedProviderUsage
+        {
+            ProviderId = "   ",
+            ProviderName = "Invalid",
+            RequestsUsed = 10,
+            RequestsAvailable = 100,
+            UsedPercent = 10,
+            IsAvailable = true,
+        };
+
+        var result = this._pipeline.Process(
+            new[] { usage },
+            new[] { "openai" },
+            isPrivacyMode: false);
+
+        Assert.Empty(result.Usages);
+        Assert.Equal(1, result.InvalidIdentityCount);
+    }
+
+    [Fact]
+    public void Process_WhenUsageNotInActiveProviderSet_FiltersInactiveEntry()
+    {
+        var usage = new WindowedProviderUsage
+        {
+            ProviderId = "not-active-provider",
+            ProviderName = "Not Active",
+            RequestsUsed = 1,
+            RequestsAvailable = 10,
+            UsedPercent = 10,
+            IsAvailable = true,
+        };
+
+        var result = this._pipeline.Process(
+            new[] { usage },
+            new[] { "openai", "anthropic" },
+            isPrivacyMode: false);
+
+        Assert.Empty(result.Usages);
+        Assert.Equal(1, result.InactiveProviderFilteredCount);
+    }
+
+    [Fact]
+    public void Process_WhenUnavailableWithoutDescription_NormalizesDescriptionAndUtcTimestamp()
+    {
+        var usage = new WindowedProviderUsage
+        {
+            ProviderId = "openai",
+            ProviderName = " OpenAI ",
+            RequestsUsed = -5,
+            RequestsAvailable = -10,
+            UsedPercent = -20,
+            IsAvailable = false,
+            Description = " ",
+            FetchedAt = default,
+            ResponseLatencyMs = -2,
+            HttpStatus = 999,
+        };
+
+        var result = this._pipeline.Process(
+            new[] { usage },
+            new[] { "openai" },
+            isPrivacyMode: false);
+
+        var processed = (QuotaProviderUsage)Assert.Single(result.Usages);
+        Assert.Equal("OpenAI", processed.ProviderName);
+        Assert.Equal(0, processed.RequestsUsed);
+        Assert.Equal(0, processed.RequestsAvailable);
+        Assert.Equal(0, processed.UsedPercent);
+        Assert.Equal("Unavailable", processed.Description);
+        Assert.Equal(0, processed.ResponseLatencyMs);
+        Assert.Equal(0, processed.HttpStatus);
+        Assert.NotEqual(default, processed.FetchedAt);
+        Assert.Equal(DateTimeKind.Utc, processed.FetchedAt.Kind);
+        Assert.True(result.NormalizedCount >= 1);
+    }
+
+    [Fact]
+    public void Process_WhenNextResetMissing_DoesNotInferNextResetFromSiblingCards()
+    {
+        // With flat cards, NextResetTime on each card is independent.
+        // A card with null NextResetTime should remain null after processing.
+        var usage = new WindowedProviderUsage
+        {
+            ProviderId = "github-copilot",
+            ProviderName = "GitHub Copilot",
+            IsAvailable = false,
+            Description = "Quota exceeded",
+            NextResetTime = null,
+            WindowKind = WindowKind.Burst,
+        };
+
+        var result = this._pipeline.Process(
+            new[] { usage },
+            new[] { "github-copilot" },
+            isPrivacyMode: false);
+
+        var processed = (QuotaProviderUsage)Assert.Single(result.Usages);
+        Assert.Null(processed.NextResetTime);
+    }
+
+    [Fact]
+    public void GetSnapshot_BeforeProcess_ReturnsZeroedTelemetry()
+    {
+        var snapshot = this._pipeline.GetSnapshot();
+
+        Assert.Equal(0, snapshot.TotalProcessedEntries);
+        Assert.Equal(0, snapshot.TotalAcceptedEntries);
+        Assert.Equal(0, snapshot.TotalRejectedEntries);
+        Assert.Equal(0, snapshot.InvalidIdentityCount);
+        Assert.Equal(0, snapshot.InactiveProviderFilteredCount);
+        Assert.Equal(0, snapshot.PlaceholderFilteredCount);
+        Assert.Equal(0, snapshot.DetailContractAdjustedCount);
+        Assert.Equal(0, snapshot.NormalizedCount);
+        Assert.Equal(0, snapshot.PrivacyRedactedCount);
+        Assert.Null(snapshot.LastProcessedAtUtc);
+        Assert.Equal(0, snapshot.LastRunTotalEntries);
+        Assert.Equal(0, snapshot.LastRunAcceptedEntries);
+    }
+
+    [Fact]
+    public void Process_MultipleRuns_AccumulatesTelemetrySnapshot()
+    {
+        _ = this._pipeline.Process(CreateFirstRunUsages(), ["openai"], isPrivacyMode: true);
+        _ = this._pipeline.Process(CreateSecondRunUsages(), ["openai"], isPrivacyMode: false);
+
+        var snapshot = this._pipeline.GetSnapshot();
+
+        Assert.Equal(6, snapshot.TotalProcessedEntries);
+        Assert.Equal(3, snapshot.TotalAcceptedEntries);
+        Assert.Equal(3, snapshot.TotalRejectedEntries);
+        Assert.Equal(1, snapshot.InvalidIdentityCount);
+        Assert.Equal(1, snapshot.InactiveProviderFilteredCount);
+        Assert.Equal(1, snapshot.PlaceholderFilteredCount);
+        Assert.Equal(0, snapshot.DetailContractAdjustedCount); // Detail contract stage is now a no-op
+        Assert.True(snapshot.NormalizedCount >= 1);
+        Assert.Equal(1, snapshot.PrivacyRedactedCount);
+        Assert.NotNull(snapshot.LastProcessedAtUtc);
+        Assert.Equal(DateTimeKind.Utc, snapshot.LastProcessedAtUtc!.Value.Kind);
+        Assert.Equal(1, snapshot.LastRunTotalEntries);
+        Assert.Equal(1, snapshot.LastRunAcceptedEntries);
+    }
+
+    private static IReadOnlyList<ProviderUsage> CreateFirstRunUsages()
+    {
+        return
+        [
+            new WindowedProviderUsage
+            {
+                ProviderId = " openai ",
+                ProviderName = " OpenAI ",
+                IsAvailable = true,
+                RequestsUsed = double.NaN,
+                RequestsAvailable = 100,
+                UsedPercent = double.PositiveInfinity,
+                RawJson = "{ \"key\": \"value\" }",
+                AccountName = "user@example.com",
+                ConfigKey = "cfg-openai",
+                FetchedAt = default,
+            },
+            new WindowedProviderUsage
+            {
+                ProviderId = string.Empty,
+                ProviderName = "Invalid",
+                IsAvailable = true,
+            },
+            new WindowedProviderUsage
+            {
+                ProviderId = "anthropic",
+                ProviderName = "Anthropic",
+                IsAvailable = true,
+            },
+            new WindowedProviderUsage
+            {
+                ProviderId = "openai",
+                ProviderName = "OpenAI",
+                IsAvailable = false,
+                State = ProviderUsageState.Missing,
+                Description = string.Empty,
+                RequestsUsed = 0,
+                RequestsAvailable = 0,
+                UsedPercent = 0,
+            },
+            new WindowedProviderUsage
+            {
+                ProviderId = "openai",
+                ProviderName = "OpenAI",
+                IsAvailable = true,
+                WindowKind = WindowKind.Burst,
+            },
+        ];
+    }
+
+    private static IReadOnlyList<ProviderUsage> CreateSecondRunUsages()
+    {
+        return
+        [
+            new WindowedProviderUsage
+            {
+                ProviderId = "openai",
+                ProviderName = "OpenAI",
+                IsAvailable = true,
+                RequestsUsed = 5,
+                RequestsAvailable = 100,
+                UsedPercent = 5,
+                FetchedAt = DateTime.UtcNow,
+            },
+        ];
+    }
+
+    // ── Flat card field preservation ─────────────────────────────────────────────
+    // These guard against regressions where the pipeline drops flat card properties
+    // like WindowKind, CardId, Name, or NextResetTime during normalization.
+    [Fact]
+    public void Process_NormalizeFlatCard_PreservesWindowKind()
+    {
+        var usage = new WindowedProviderUsage
+        {
+            ProviderId = "codex",
+            ProviderName = "Codex",
+            CardId = "weekly",
+            GroupId = "codex",
+            Name = "Weekly quota",
+            WindowKind = WindowKind.Rolling,
+            UsedPercent = 65,
+            IsQuotaBased = true,
+            IsAvailable = true,
+        };
+
+        var result = this._pipeline.Process(
+            new[] { usage },
+            new[] { "codex" },
+            isPrivacyMode: false);
+
+        var processed = (WindowedProviderUsage)Assert.Single(result.Usages);
+        Assert.Equal(WindowKind.Rolling, processed.WindowKind);
+        Assert.Equal("weekly", processed.CardId);
+        Assert.Equal("Weekly quota", processed.Name);
+    }
+
+    [Fact]
+    public void Process_NormalizeFlatCard_PreservesNextResetTime()
+    {
+        var localTime = new DateTime(2026, 4, 1, 10, 0, 0, DateTimeKind.Local);
+        var usage = new WindowedProviderUsage
+        {
+            ProviderId = "codex",
+            CardId = "burst",
+            Name = "5-hour quota",
+            WindowKind = WindowKind.Burst,
+            NextResetTime = localTime,
+            IsAvailable = true,
+            IsQuotaBased = true,
+            UsedPercent = 20,
+        };
+
+        var result = this._pipeline.Process(
+            new[] { usage },
+            new[] { "codex" },
+            isPrivacyMode: false);
+
+        var processed = (QuotaProviderUsage)Assert.Single(result.Usages);
+        Assert.NotNull(processed.NextResetTime);
+    }
+
+    [Fact]
+    public void Process_NormalizeFlatCard_PreservesIsStale()
+    {
+        var usage = new WindowedProviderUsage
+        {
+            ProviderId = "codex",
+            CardId = "burst",
+            WindowKind = WindowKind.Burst,
+            IsStale = true,
+            IsAvailable = true,
+            IsQuotaBased = true,
+            UsedPercent = 50,
+        };
+
+        var result = this._pipeline.Process(
+            new[] { usage },
+            new[] { "codex" },
+            isPrivacyMode: false);
+
+        var processed = Assert.Single(result.Usages);
+        Assert.True(processed.IsStale);
+    }
+
+    /// <summary>
+    /// Regression test for the bug introduced in commit 0090b52c.
+    /// codex.spark cards emitted by the codex provider must pass the authority stage
+    /// because codex.StaticDefinition declares codex.spark in CoReportedProviderIds,
+    /// and ExpandAcceptedUsageProviderIds includes co-reported IDs in the accepted set.
+    /// </summary>
+    [Fact]
+    public void Process_CodexSparkCard_PassesAuthorityViaCodexDefinition()
+    {
+        var sparkBurst = new WindowedProviderUsage
+        {
+            ProviderId = "codex.spark",
+            ProviderName = "OpenAI (GPT-5.3 Codex Spark)",
+            CardId = "spark.burst",
+            GroupId = "codex",
+            Name = "5h",
+            WindowKind = WindowKind.Burst,
+            UsedPercent = 15,
+            IsAvailable = true,
+            IsQuotaBased = true,
+        };
+
+        // Active provider is "codex" — the codex API call emits both codex and codex.spark cards.
+        // codex.StaticDefinition.CoReportedProviderIds includes "codex.spark", so
+        // ExpandAcceptedUsageProviderIds("codex") also accepts "codex.spark" cards.
+        var expandedIds = ProviderMetadataCatalog.ExpandAcceptedUsageProviderIds(new[] { "codex" });
+        var result = this._pipeline.Process(
+            new[] { sparkBurst },
+            activeProviderIds: expandedIds,
+            isPrivacyMode: false);
+
+        var processed = Assert.Single(result.Usages);
+        Assert.Equal("codex.spark", processed.ProviderId);
+        Assert.Equal(0, result.InactiveProviderFilteredCount);
+    }
+
+    [Fact]
+    public void Process_CodexSparkCard_IsRejectedWhenCodexNotActive()
+    {
+        var orphaned = new WindowedProviderUsage
+        {
+            ProviderId = "codex.spark",
+            CardId = "spark.burst",
+            GroupId = "codex",
+            WindowKind = WindowKind.Burst,
+            IsAvailable = true,
+            UsedPercent = 15,
+        };
+
+        // Neither codex.spark nor codex is in the active set — card must be rejected.
+        var result = this._pipeline.Process(
+            new[] { orphaned },
+            activeProviderIds: new[] { "openai" },
+            isPrivacyMode: false);
+
+        Assert.Empty(result.Usages);
+        Assert.Equal(1, result.InactiveProviderFilteredCount);
+    }
+}

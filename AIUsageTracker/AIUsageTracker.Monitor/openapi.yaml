@@ -1,0 +1,843 @@
+openapi: 3.0.3
+info:
+  title: AI Usage Tracker Monitor API
+  version: 1.0.0
+  description: |
+    HTTP API exposed by the Agent service.
+    This contract is consumed by the Slim UI, Desktop UI, Web UI, and CLI.
+servers:
+  - url: http://localhost:{port}
+    description: Local Agent endpoint
+    variables:
+      port:
+        default: "5000"
+        description: Port discovered from %LOCALAPPDATA%\AIUsageTracker\monitor.json
+
+paths:
+  /api/health:
+    get:
+      summary: Agent health status
+      operationId: getHealth
+      responses:
+        "200":
+          description: Agent is healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+
+  /api/diagnostics:
+    get:
+      summary: Agent runtime diagnostics
+      operationId: getDiagnostics
+      responses:
+        "200":
+          description: Diagnostic snapshot
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DiagnosticsResponse"
+
+  /api/usage:
+    get:
+      summary: Latest usage per provider
+      operationId: getUsage
+      responses:
+        "200":
+          description: Latest provider usage records
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ProviderUsage"
+
+  /api/usage/grouped:
+    get:
+      summary: Latest usage grouped by provider with nested model rows
+      operationId: getGroupedUsage
+      responses:
+        "200":
+          description: Canonical grouped provider usage snapshot
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GroupedUsageSnapshot"
+
+  /api/usage/{providerId}:
+    get:
+      summary: Latest usage for a specific provider
+      operationId: getUsageByProvider
+      parameters:
+        - name: providerId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Usage record found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProviderUsage"
+        "404":
+          description: Provider not found
+
+  /api/refresh:
+    post:
+      summary: Trigger provider refresh
+      operationId: triggerRefresh
+      responses:
+        "200":
+          description: Refresh accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
+
+  /api/notifications/test:
+    post:
+      summary: Send a Windows test notification
+      operationId: sendTestNotification
+      responses:
+        "200":
+          description: Test notification sent
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
+
+  /api/config:
+    get:
+      summary: List provider configuration
+      operationId: getConfig
+      responses:
+        "200":
+          description: Provider configuration list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ProviderConfig"
+    post:
+      summary: Save provider configuration
+      operationId: saveConfig
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProviderConfig"
+      responses:
+        "200":
+          description: Configuration saved
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
+
+  /api/config/{providerId}:
+    delete:
+      summary: Remove provider configuration
+      operationId: removeConfig
+      parameters:
+        - name: providerId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Configuration removed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
+
+  /api/scan-keys:
+    post:
+      summary: Scan environment/files for provider keys
+      operationId: scanKeys
+      responses:
+        "200":
+          description: Scan result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScanKeysResponse"
+
+  /api/history:
+    get:
+      summary: Usage history across providers
+      operationId: getHistory
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            default: 100
+      responses:
+        "200":
+          description: Usage history records
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ProviderUsage"
+
+  /api/history/{providerId}:
+    get:
+      summary: Usage history for a provider
+      operationId: getHistoryByProvider
+      parameters:
+        - name: providerId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            default: 100
+      responses:
+        "200":
+          description: Provider usage history records
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ProviderUsage"
+
+  /api/resets/{providerId}:
+    get:
+      summary: Reset events for a provider
+      operationId: getResetEvents
+      parameters:
+        - name: providerId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            default: 50
+      responses:
+        "200":
+          description: Provider reset events
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ResetEvent"
+
+  /api/providers/{providerId}/test:
+    post:
+      summary: Test provider connectivity
+      operationId: testProviderConnection
+      parameters:
+        - name: providerId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Provider connectivity test result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
+
+components:
+  schemas:
+    HealthResponse:
+      type: object
+      required: [status, timestamp, port, process_id, contract_version]
+      properties:
+        status:
+          type: string
+          example: healthy
+        timestamp:
+          type: string
+          format: date-time
+        port:
+          type: integer
+        process_id:
+          type: integer
+        contract_version:
+          type: string
+          description: Canonical Monitor API contract version.
+          example: "1"
+        api_contract_version:
+          type: string
+          description: Legacy alias for contract_version. Accepted for backward-compatible deserialization and may be omitted in responses.
+        min_client_contract_version:
+          type: string
+          description: Minimum client contract version accepted by this monitor.
+          example: "1"
+        min_client_api_contract_version:
+          type: string
+          description: Legacy alias for min_client_contract_version. Accepted for backward-compatible deserialization and may be omitted in responses.
+
+    DiagnosticsResponse:
+      type: object
+      required: [port, process_id, working_dir, base_dir, started_at, os, runtime, args, endpoints, refresh_telemetry, scheduler_telemetry, pipeline_telemetry, observability]
+      properties:
+        port:
+          type: integer
+        process_id:
+          type: integer
+        working_dir:
+          type: string
+        base_dir:
+          type: string
+        started_at:
+          type: string
+          description: Local timestamp formatted as yyyy-MM-dd HH:mm:ss
+        os:
+          type: string
+        runtime:
+          type: string
+        args:
+          type: array
+          items:
+            type: string
+        endpoints:
+          type: array
+          items:
+            $ref: "#/components/schemas/EndpointDescriptor"
+        refresh_telemetry:
+          $ref: "#/components/schemas/RefreshTelemetrySnapshot"
+        scheduler_telemetry:
+          $ref: "#/components/schemas/MonitorJobSchedulerSnapshot"
+        pipeline_telemetry:
+          $ref: "#/components/schemas/ProviderUsageProcessingTelemetrySnapshot"
+        observability:
+          $ref: "#/components/schemas/MonitorObservabilitySnapshot"
+
+    EndpointDescriptor:
+      type: object
+      required: [route, methods]
+      properties:
+        route:
+          type: string
+        methods:
+          type: array
+          items:
+            type: string
+
+    MonitorObservabilitySnapshot:
+      type: object
+      required: [activity_source_names]
+      properties:
+        activity_source_names:
+          type: array
+          items:
+            type: string
+
+    RefreshTelemetrySnapshot:
+      type: object
+      required: [refresh_count, refresh_success_count, refresh_failure_count, error_rate_percent, average_latency_ms, last_latency_ms]
+      properties:
+        refresh_count:
+          type: integer
+          format: int64
+        refresh_success_count:
+          type: integer
+          format: int64
+        refresh_failure_count:
+          type: integer
+          format: int64
+        error_rate_percent:
+          type: number
+          format: double
+        average_latency_ms:
+          type: number
+          format: double
+        last_latency_ms:
+          type: integer
+          format: int64
+        last_refresh_completed_utc:
+          type: string
+          format: date-time
+          nullable: true
+        last_error:
+          type: string
+          nullable: true
+
+    MonitorJobSchedulerSnapshot:
+      type: object
+      required: [high_priority_queued_jobs, normal_priority_queued_jobs, low_priority_queued_jobs, total_queued_jobs, recurring_jobs, executed_jobs, failed_jobs, enqueued_jobs, dequeued_jobs, coalesced_skipped_jobs, dispatch_noop_signals, in_flight_jobs]
+      properties:
+        high_priority_queued_jobs:
+          type: integer
+        normal_priority_queued_jobs:
+          type: integer
+        low_priority_queued_jobs:
+          type: integer
+        total_queued_jobs:
+          type: integer
+        recurring_jobs:
+          type: integer
+        executed_jobs:
+          type: integer
+          format: int64
+        failed_jobs:
+          type: integer
+          format: int64
+        enqueued_jobs:
+          type: integer
+          format: int64
+        dequeued_jobs:
+          type: integer
+          format: int64
+        coalesced_skipped_jobs:
+          type: integer
+          format: int64
+        dispatch_noop_signals:
+          type: integer
+          format: int64
+        in_flight_jobs:
+          type: integer
+          format: int64
+
+    ProviderUsageProcessingTelemetrySnapshot:
+      type: object
+      required: [total_processed_entries, total_accepted_entries, total_rejected_entries, invalid_identity_count, inactive_provider_filtered_count, placeholder_filtered_count, detail_contract_adjusted_count, normalized_count, privacy_redacted_count, last_run_total_entries, last_run_accepted_entries]
+      properties:
+        total_processed_entries:
+          type: integer
+          format: int64
+        total_accepted_entries:
+          type: integer
+          format: int64
+        total_rejected_entries:
+          type: integer
+          format: int64
+        invalid_identity_count:
+          type: integer
+          format: int64
+        inactive_provider_filtered_count:
+          type: integer
+          format: int64
+        placeholder_filtered_count:
+          type: integer
+          format: int64
+        detail_contract_adjusted_count:
+          type: integer
+          format: int64
+        normalized_count:
+          type: integer
+          format: int64
+        privacy_redacted_count:
+          type: integer
+          format: int64
+        last_processed_at_utc:
+          type: string
+          format: date-time
+          nullable: true
+        last_run_total_entries:
+          type: integer
+        last_run_accepted_entries:
+          type: integer
+
+    MessageResponse:
+      type: object
+      required: [message]
+      properties:
+        message:
+          type: string
+
+    ScanKeysResponse:
+      type: object
+      required: [discovered, configs]
+      properties:
+        discovered:
+          type: integer
+        configs:
+          type: array
+          items:
+            $ref: "#/components/schemas/ProviderConfig"
+
+    PlanType:
+      type: string
+      enum: [usage, coding]
+
+    AppTheme:
+      type: string
+      enum: [dark, light]
+
+    ProviderUsageDetail:
+      type: object
+      properties:
+        name:
+          type: string
+        model_name:
+          type: string
+        group_name:
+          type: string
+        used:
+          type: string
+        description:
+          type: string
+        next_reset_time:
+          type: string
+          format: date-time
+          nullable: true
+
+    ProviderUsage:
+      type: object
+      properties:
+        provider_id:
+          type: string
+        provider_name:
+          type: string
+        requests_used:
+          type: number
+          format: double
+        requests_available:
+          type: number
+          format: double
+        requests_percentage:
+          type: number
+          format: double
+        plan_type:
+          $ref: "#/components/schemas/PlanType"
+        usage_unit:
+          type: string
+        is_quota_based:
+          type: boolean
+        display_as_fraction:
+          type: boolean
+        is_available:
+          type: boolean
+        description:
+          type: string
+        auth_source:
+          type: string
+        details:
+          type: array
+          nullable: true
+          items:
+            $ref: "#/components/schemas/ProviderUsageDetail"
+        account_name:
+          type: string
+        config_key:
+          type: string
+        next_reset_time:
+          type: string
+          format: date-time
+          nullable: true
+        fetched_at:
+          type: string
+          format: date-time
+        raw_json:
+          type: string
+          nullable: true
+        http_status:
+          type: integer
+        upstream_response_validity:
+          type: string
+          enum: [unknown, not_attempted, valid, invalid]
+        upstream_response_note:
+          type: string
+      required:
+        - provider_id
+        - provider_name
+        - requests_used
+        - requests_available
+        - requests_percentage
+        - plan_type
+        - is_available
+        - description
+
+    GroupedModelUsage:
+      type: object
+      properties:
+        model_id:
+          type: string
+        model_name:
+          type: string
+        used_percentage:
+          type: number
+          format: double
+          nullable: true
+        remaining_percentage:
+          type: number
+          format: double
+          nullable: true
+        next_reset_time:
+          type: string
+          format: date-time
+          nullable: true
+        description:
+          type: string
+        effective_used_percentage:
+          type: number
+          format: double
+          nullable: true
+        effective_remaining_percentage:
+          type: number
+          format: double
+          nullable: true
+        effective_next_reset_time:
+          type: string
+          format: date-time
+          nullable: true
+        effective_description:
+          type: string
+          nullable: true
+        quota_buckets:
+          type: array
+          items:
+            $ref: "#/components/schemas/GroupedQuotaBucketUsage"
+      required:
+        - model_id
+        - model_name
+        - description
+        - quota_buckets
+
+    GroupedQuotaBucketUsage:
+      type: object
+      properties:
+        bucket_id:
+          type: string
+        bucket_name:
+          type: string
+        used_percentage:
+          type: number
+          format: double
+          nullable: true
+        remaining_percentage:
+          type: number
+          format: double
+          nullable: true
+        next_reset_time:
+          type: string
+          format: date-time
+          nullable: true
+        description:
+          type: string
+      required:
+        - bucket_id
+        - bucket_name
+        - description
+
+    GroupedProviderUsage:
+      type: object
+      properties:
+        provider_id:
+          type: string
+        provider_name:
+          type: string
+        account_name:
+          type: string
+        is_available:
+          type: boolean
+        plan_type:
+          $ref: "#/components/schemas/PlanType"
+        is_quota_based:
+          type: boolean
+        requests_used:
+          type: number
+          format: double
+        requests_available:
+          type: number
+          format: double
+        requests_percentage:
+          type: number
+          format: double
+        description:
+          type: string
+        fetched_at:
+          type: string
+          format: date-time
+        next_reset_time:
+          type: string
+          format: date-time
+          nullable: true
+        model_count:
+          type: integer
+        models:
+          type: array
+          items:
+            $ref: "#/components/schemas/GroupedModelUsage"
+      required:
+        - provider_id
+        - provider_name
+        - account_name
+        - is_available
+        - plan_type
+        - is_quota_based
+        - requests_used
+        - requests_available
+        - requests_percentage
+        - description
+        - fetched_at
+        - model_count
+        - models
+
+    GroupedUsageSnapshot:
+      type: object
+      properties:
+        contract_version:
+          type: string
+        generated_at_utc:
+          type: string
+          format: date-time
+        providers:
+          type: array
+          items:
+            $ref: "#/components/schemas/GroupedProviderUsage"
+      required:
+        - contract_version
+        - generated_at_utc
+        - providers
+
+    AIModelConfig:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        matches:
+          type: array
+          items:
+            type: string
+        color:
+          type: string
+          nullable: true
+      required: [id, name, matches]
+
+    ProviderConfig:
+      type: object
+      properties:
+        provider_id:
+          type: string
+        api_key:
+          type: string
+        type:
+          type: string
+        plan_type:
+          $ref: "#/components/schemas/PlanType"
+        limit:
+          type: number
+          format: double
+          nullable: true
+        base_url:
+          type: string
+          nullable: true
+        show_in_tray:
+          type: boolean
+        enable_notifications:
+          type: boolean
+        enabled_sub_trays:
+          type: array
+          items:
+            type: string
+        models:
+          type: array
+          items:
+            $ref: "#/components/schemas/AIModelConfig"
+      required: [provider_id]
+
+    AppPreferences:
+      type: object
+      properties:
+        show_all:
+          type: boolean
+        window_width:
+          type: number
+          format: double
+        window_height:
+          type: number
+          format: double
+        window_left:
+          type: number
+          format: double
+          nullable: true
+        window_top:
+          type: number
+          format: double
+          nullable: true
+        stay_open:
+          type: boolean
+        always_on_top:
+          type: boolean
+        compact_mode:
+          type: boolean
+        color_threshold_yellow:
+          type: integer
+        color_threshold_red:
+          type: integer
+        invert_progress_bar:
+          type: boolean
+        invert_calculations:
+          type: boolean
+        font_family:
+          type: string
+        font_size:
+          type: integer
+        font_bold:
+          type: boolean
+        font_italic:
+          type: boolean
+        auto_refresh_interval:
+          type: integer
+        is_privacy_mode:
+          type: boolean
+        enable_notifications:
+          type: boolean
+        notification_threshold:
+          type: number
+          format: double
+        start_with_windows:
+          type: boolean
+        theme:
+          $ref: "#/components/schemas/AppTheme"
+        debug_mode:
+          type: boolean
+        is_plans_and_quotas_collapsed:
+          type: boolean
+        is_pay_as_you_go_collapsed:
+          type: boolean
+        is_antigravity_collapsed:
+          type: boolean
+
+    ResetEvent:
+      type: object
+      properties:
+        id:
+          type: string
+        provider_id:
+          type: string
+        provider_name:
+          type: string
+        previous_usage:
+          type: number
+          format: double
+          nullable: true
+        new_usage:
+          type: number
+          format: double
+          nullable: true
+        reset_type:
+          type: string
+        timestamp:
+          type: string
+      required: [id, provider_id, provider_name, reset_type, timestamp]

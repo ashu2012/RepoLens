@@ -1,0 +1,132 @@
+// <copyright file="WebProviderUsageMapper.cs" company="AIUsageTracker">
+// Copyright (c) AIUsageTracker. All rights reserved.
+// </copyright>
+
+using System.Globalization;
+using AIUsageTracker.Core.Models;
+
+namespace AIUsageTracker.Web.Services;
+
+internal static class WebProviderUsageMapper
+{
+    public static ProviderUsage Map(dynamic row)
+    {
+        var cardType = (string?)row.card_type;
+
+        var providerId = row.provider_id ?? string.Empty;
+        var providerName = row.ProviderName ?? string.Empty;
+        var isAvailable = row.is_available == 1;
+        var description = row.status_message ?? string.Empty;
+        var fetchedAt = ParseDateTimeUtc(row.fetched_at);
+
+        if (cardType == "status")
+        {
+            return new StatusProviderUsage
+            {
+                ProviderId = providerId,
+                ProviderName = providerName,
+                IsAvailable = isAvailable,
+                Description = description,
+                FetchedAt = fetchedAt,
+                ResponseLatencyMs = (double)(row.response_latency_ms ?? 0.0),
+            };
+        }
+
+        var usage = new QuotaProviderUsage
+        {
+            ProviderId = providerId,
+            ProviderName = providerName,
+            IsAvailable = isAvailable,
+            Description = description,
+            RequestsUsed = (double)(row.requests_used ?? 0.0),
+            RequestsAvailable = (double)(row.requests_available ?? 0.0),
+            UsedPercent = (double)(row.requests_percentage ?? 0.0),
+            ResponseLatencyMs = (double)(row.response_latency_ms ?? 0.0),
+            FetchedAt = fetchedAt,
+        };
+
+        usage.NextResetTime = ParseNullableDateTimeUtc(row.next_reset_time);
+
+        return usage;
+    }
+
+    private static DateTime? ParseNullableDateTimeUtc(object? value)
+    {
+        if (value == null || value is DBNull)
+        {
+            return null;
+        }
+
+        if (value is string text && string.IsNullOrWhiteSpace(text))
+        {
+            return null;
+        }
+
+        return ParseDateTimeUtc(value);
+    }
+
+    private static DateTime ParseDateTimeUtc(object? value)
+    {
+        if (value == null || value is DBNull)
+        {
+            return DateTime.UtcNow;
+        }
+
+        if (value is DateTime dateTime)
+        {
+            return dateTime.Kind == DateTimeKind.Utc ? dateTime : dateTime.ToUniversalTime();
+        }
+
+        if (value is DateTimeOffset dateTimeOffset)
+        {
+            return dateTimeOffset.UtcDateTime;
+        }
+
+        if (TryParseEpochSeconds(value, out var epochSeconds))
+        {
+            return DateTimeOffset.FromUnixTimeSeconds(epochSeconds).UtcDateTime;
+        }
+
+        if (DateTime.TryParse(
+                Convert.ToString(value, CultureInfo.InvariantCulture),
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal,
+                out var parsed))
+        {
+            return parsed;
+        }
+
+        return DateTime.Parse(
+            Convert.ToString(value, CultureInfo.InvariantCulture) ?? string.Empty,
+            CultureInfo.InvariantCulture,
+            DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal);
+    }
+
+    private static bool TryParseEpochSeconds(object value, out long epochSeconds)
+    {
+        switch (value)
+        {
+            case long longValue:
+                epochSeconds = longValue;
+                return true;
+            case int intValue:
+                epochSeconds = intValue;
+                return true;
+            case short shortValue:
+                epochSeconds = shortValue;
+                return true;
+            case double doubleValue when double.IsFinite(doubleValue):
+                epochSeconds = Convert.ToInt64(doubleValue, CultureInfo.InvariantCulture);
+                return true;
+            case decimal decimalValue:
+                epochSeconds = Convert.ToInt64(decimalValue, CultureInfo.InvariantCulture);
+                return true;
+            case string stringValue when long.TryParse(stringValue, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed):
+                epochSeconds = parsed;
+                return true;
+            default:
+                epochSeconds = 0;
+                return false;
+        }
+    }
+}

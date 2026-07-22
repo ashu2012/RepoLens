@@ -1,0 +1,98 @@
+// <copyright file="OpenRouterProviderTests.cs" company="AIUsageTracker">
+// Copyright (c) AIUsageTracker. All rights reserved.
+// </copyright>
+
+using System.Net;
+using System.Text.Json;
+using AIUsageTracker.Core.Models;
+using AIUsageTracker.Infrastructure.Providers;
+
+namespace AIUsageTracker.Tests.Infrastructure.Providers;
+
+public class OpenRouterProviderTests : HttpProviderTestBase<OpenRouterProvider>
+{
+    private static readonly string TestApiKey = Guid.NewGuid().ToString();
+
+    private readonly OpenRouterProvider _provider;
+
+    public OpenRouterProviderTests()
+    {
+        this._provider = new OpenRouterProvider(this.HttpClient, this.Logger.Object);
+        this.Config.ApiKey = TestApiKey;
+    }
+
+    [Fact]
+    public async Task GetUsageAsync_ValidResponse_ParsesCreditsAndKeyInfoAsync()
+    {
+        var creditsResponse = new
+        {
+            data = new
+            {
+                total_credits = 10.0,
+                total_usage = 2.5,
+            },
+        };
+
+        var keyResponse = new
+        {
+            data = new
+            {
+                label = "My Project Key",
+                limit = 100.0,
+                is_free_tier = false,
+            },
+        };
+
+        this.SetupHttpResponse("https://openrouter.ai/api/v1/credits", new HttpResponseMessage
+        {
+            StatusCode = HttpStatusCode.OK,
+            Content = new StringContent(JsonSerializer.Serialize(creditsResponse)),
+        });
+
+        this.SetupHttpResponse("https://openrouter.ai/api/v1/key", new HttpResponseMessage
+        {
+            StatusCode = HttpStatusCode.OK,
+            Content = new StringContent(JsonSerializer.Serialize(keyResponse)),
+        });
+
+        var result = await this._provider.GetUsageAsync(this.Config);
+
+        // Provider now emits flat cards: credits + spending-limit + free-tier
+        var usages = result.OfType<WindowedProviderUsage>().ToList();
+
+        var creditsCard = Assert.Single(usages, u => string.Equals(u.CardId, "credits", StringComparison.Ordinal));
+        Assert.True(creditsCard.IsAvailable);
+        Assert.Equal("My Project Key", creditsCard.ProviderName);
+        Assert.Equal("Openrouter", creditsCard.Name);
+        Assert.Equal(25.0, creditsCard.UsedPercent); // 2.5 used of 10 total = 25% used
+        Assert.Equal(2.5, creditsCard.RequestsUsed);
+        Assert.False(creditsCard.IsQuotaBased);
+
+        Assert.Equal("$7.50 remaining", creditsCard.Description);
+
+        Assert.Contains(
+            usages,
+            u => string.Equals(u.Name, "Spending Limit", StringComparison.Ordinal) &&
+                u.Description.StartsWith("100.00", StringComparison.Ordinal));
+        Assert.Contains(
+            usages,
+            u => string.Equals(u.Name, "Free Tier", StringComparison.Ordinal) &&
+                string.Equals(u.Description, "No", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task GetUsageAsync_CreditsApiError_ReturnsUnavailableAsync()
+    {
+        this.SetupHttpResponse("https://openrouter.ai/api/v1/credits", new HttpResponseMessage
+        {
+            StatusCode = HttpStatusCode.Unauthorized,
+        });
+
+        var result = await this._provider.GetUsageAsync(this.Config);
+
+        var usage = result.Single();
+        Assert.False(usage.IsAvailable);
+        Assert.Equal(401, usage.HttpStatus);
+        Assert.Contains("Authentication failed", usage.Description, StringComparison.Ordinal);
+    }
+}

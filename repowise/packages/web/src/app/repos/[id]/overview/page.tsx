@@ -1,0 +1,224 @@
+import type { Metadata } from "next";
+import { notFound } from "next/navigation";
+import { Hash } from "lucide-react";
+import Link from "next/link";
+import { getOverviewSummary } from "@/lib/api/overview";
+import { getProviders } from "@/lib/api/providers";
+import { getStatsHighlights } from "@/lib/api/stats";
+import { getCoupling } from "@/lib/api/coupling";
+import { StatsTeaserCard } from "@/components/overview/stats-teaser-card";
+import { Badge } from "@repowise-dev/ui/ui/badge";
+import { PageShell } from "@repowise-dev/ui/shared";
+import { FirstIndexExperience } from "@/components/repos/first-index-experience";
+import { HealthOverviewCard } from "@repowise-dev/ui/dashboard/health-overview-card";
+import { AttentionPanel } from "@repowise-dev/ui/dashboard/attention-panel";
+import { KpiStrip, kpiDelta, type KpiItem } from "@repowise-dev/ui/dashboard/kpi-strip";
+import { OverviewGrid, OverviewPanelPair } from "@repowise-dev/ui/dashboard/overview-grid";
+import { SavingsMini } from "@repowise-dev/ui/dashboard/savings-mini";
+import { IndexStorageMini } from "@repowise-dev/ui/dashboard/index-storage-mini";
+import { LanguageDonut } from "@repowise-dev/ui/dashboard/language-donut";
+import { KnowledgeGraphCard } from "@repowise-dev/ui/dashboard/explore-cards";
+import { CouplingMiniCard } from "@repowise-dev/ui/dashboard/coupling-mini-card";
+import { AskAnythingCardWrapper } from "@/components/overview/ask-anything-card-wrapper";
+import { QuickActionsWrapper as QuickActions } from "@/components/dashboard/quick-actions-wrapper";
+import { OverviewTabs } from "@/components/overview/overview-tabs";
+import { ContributorsStripCard } from "@/components/overview/contributors-strip-card";
+import { formatNumber, formatRelativeTime } from "@repowise-dev/ui/lib/format";
+
+export const metadata: Metadata = { title: "Overview" };
+
+interface Props {
+  params: Promise<{ id: string }>;
+}
+
+async function safeFetch<T>(fn: () => Promise<T>): Promise<T | null> {
+  try {
+    return await fn();
+  } catch {
+    return null;
+  }
+}
+
+export default async function OverviewPage({ params }: Props) {
+  const { id } = await params;
+
+  const [summary, providers, statsHighlights, coupling] = await Promise.all([
+    safeFetch(() => getOverviewSummary(id)),
+    safeFetch(() => getProviders()),
+    safeFetch(() => getStatsHighlights(id)),
+    safeFetch(() => getCoupling(id, { limit: 3 })),
+  ]);
+  if (!summary) notFound();
+
+  const { repo, stats, health, sync } = summary;
+  const isFresh = stats.file_count === 0;
+
+  // Fall back to the sync page count so the tile still reads on a server that
+  // predates the AI/auto split; the split line just hides.
+  const docPages = stats.doc_page_count ?? sync.page_count ?? 0;
+  const autoPages = stats.doc_auto_page_count;
+  const aiPages = autoPages != null ? Math.max(0, docPages - autoPages) : null;
+
+  const kpis: KpiItem[] = [
+    {
+      label: "Files",
+      value: formatNumber(stats.file_count),
+      href: `/repos/${id}/files`,
+      // File-count growth is neutral, not "good" — render the delta uncolored.
+      delta: kpiDelta(stats.deltas.file_count, true),
+    },
+    {
+      label: "Symbols",
+      value: formatNumber(stats.symbol_count),
+      href: `/repos/${id}/architecture?view=symbols`,
+    },
+    {
+      label: "Docs",
+      value: formatNumber(docPages),
+      href: `/repos/${id}/docs`,
+      // The AI/auto split is the interesting part of a page count: it says how
+      // much of the wiki a model wrote vs what was templated from structure.
+      description:
+        docPages > 0 && aiPages != null && autoPages != null
+          ? `${formatNumber(aiPages)} AI · ${formatNumber(autoPages)} auto`
+          : undefined,
+    },
+    {
+      label: "Dead Exports",
+      value: formatNumber(stats.dead_export_count),
+      href: `/repos/${id}/code-health?tab=dead-code`,
+    },
+    {
+      label: "Entry Points",
+      value: formatNumber(stats.entry_point_count),
+      href: `/repos/${id}/architecture?view=graph&viewMode=architecture`,
+    },
+  ];
+
+  const langDistribution: Record<string, number> = {};
+  for (const l of summary.languages) langDistribution[l.language] = l.file_count;
+
+  const attentionItems = summary.attention.map((a) => ({
+    id: a.id,
+    type: a.type,
+    title: a.title,
+    description: a.description,
+    severity: a.severity,
+    target_id: a.target_id,
+  }));
+
+  const lastActivityAt = sync.last_sync_at ?? sync.last_resync_at ?? health.last_indexed_at;
+
+  const headerMeta = (
+    <div className="flex flex-wrap items-center gap-2">
+      {repo.head_commit && (
+        <Badge variant="outline" className="text-[10px] h-5 shrink-0">
+          <Hash className="h-2.5 w-2.5" />
+          {repo.head_commit.slice(0, 7)}
+        </Badge>
+      )}
+      <Badge variant="outline" className="text-[10px] h-5 shrink-0">
+        {repo.default_branch}
+      </Badge>
+      {lastActivityAt && (
+        <span
+          className="text-xs text-[var(--color-text-tertiary)]"
+          title={new Date(lastActivityAt).toLocaleString()}
+        >
+          synced {formatRelativeTime(lastActivityAt)}
+        </span>
+      )}
+    </div>
+  );
+
+  return (
+    <PageShell title={repo.name} description={repo.local_path} actions={headerMeta} maxWidth="wide">
+      {/* Fresh repos get one prominent index action instead of the sync
+          toolbar; everything else appears once the first index lands. */}
+      {!isFresh && (
+        <QuickActions
+          repoId={id}
+          repoName={repo.name}
+          pageCount={sync.page_count || stats.file_count}
+          modelName={providers?.active.model ?? sync.last_sync_model ?? ""}
+          lastSyncAt={sync.last_sync_at}
+          lastResyncAt={sync.last_resync_at}
+          // Offer the bulk "Write with AI" action only when template (auto)
+          // pages actually exist to upgrade.
+          docsMode={autoPages != null && autoPages > 0 ? "deterministic" : undefined}
+        />
+      )}
+
+      {isFresh ? (
+        <FirstIndexExperience repoId={id} repoName={repo.name} />
+      ) : (
+        <>
+          {/* ── KPI bar leads ── */}
+          <KpiStrip items={kpis} LinkComponent={Link} />
+
+          {/* ── Code Health (our moat) leads, with triage + savings rail ── */}
+          <OverviewGrid
+            main={
+              <>
+                <HealthOverviewCard
+                  data={health}
+                  repoId={id}
+                  averageDelta={stats.deltas.average_health}
+                  hotspotDelta={stats.deltas.hotspot_health}
+                  defectAccuracy={statsHighlights?.quality.defect_accuracy ?? null}
+                />
+                <ContributorsStripCard repoId={id} />
+                {/* The two short tiles sit two-up here rather than stacked in
+                    the rail: it keeps the main column from bottoming out well
+                    above the taller Attention panel beside it. */}
+                <OverviewPanelPair>
+                  <SavingsMini data={summary.savings} repoId={id} />
+                  <IndexStorageMini
+                    data={{
+                      index_storage_bytes: sync.index_storage_bytes ?? 0,
+                      page_count: sync.page_count,
+                      doc_coverage_pct: stats.doc_coverage_pct,
+                    }}
+                  />
+                </OverviewPanelPair>
+              </>
+            }
+            rail={
+              <>
+                {statsHighlights && <StatsTeaserCard repoId={id} data={statsHighlights} />}
+                <AttentionPanel items={attentionItems} repoId={id} previewCount={5} repoName={repo.name} />
+              </>
+            }
+          />
+
+          {/* ── Pulse / Structure ── */}
+          <OverviewTabs
+            repoId={id}
+            hotspots={summary.top_hotspots}
+            hotspotTotal={stats.hotspot_count}
+            decisions={summary.recent_decisions}
+          />
+
+          {/* ── Languages + explore: donut alongside the graph, coupling, and
+              chat front-doors. Coupling has no sidebar entry, so this card is
+              its discoverable landing-page door. ── */}
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+            {summary.languages.length > 0 && (
+              <LanguageDonut
+                distribution={langDistribution}
+                viewAllHref={`/repos/${id}/architecture?view=graph&colorMode=language`}
+              />
+            )}
+            <KnowledgeGraphCard href={`/repos/${id}/knowledge-graph`} />
+            <CouplingMiniCard
+              edges={coupling?.edges ?? []}
+              href={`/repos/${id}/architecture?view=coupling`}
+              LinkComponent={Link}
+            />
+            <AskAnythingCardWrapper repoId={id} />
+          </div>
+        </>
+      )}
+    </PageShell>
+  );
+}

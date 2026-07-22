@@ -1,0 +1,709 @@
+@page
+@model IndexModel
+@using AIUsageTracker.Core.Models
+@using AIUsageTracker.Infrastructure.Providers
+@{
+    ViewData["Title"] = "Dashboard";
+}
+
+<h1 class="page-title">Dashboard</h1>
+
+<div hx-get="/" hx-trigger="every 60s" hx-select="#dashboard-content" hx-swap="innerHTML">
+    <div id="dashboard-content">
+        @if (!Model.IsDatabaseAvailable)
+        {
+            <div class="alert alert-warning">
+                <strong>Database not found!</strong> The Monitor database is not available. 
+                Ensure the Monitor has run at least once to initialize the database.
+            </div>
+        }
+        else if (Model.Summary != null)
+        {
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <h3>Active Providers</h3>
+                    <div class="stat-value">@Model.Summary.ProviderCount</div>
+                </div>
+                <div class="stat-card">
+                    <h3>Average Usage</h3>
+                    <div class="stat-value @GetUsageClass(Model.Summary.AverageUsage)">@Model.Summary.AverageUsage.ToString("F1")%</div>
+                </div>
+                <div class="stat-card">
+                    <h3>Last Update</h3>
+                    <div class="stat-value">@GetLastUpdateDisplay(Model.Summary.LastUpdate)</div>
+                </div>
+            </div>
+        }
+
+        @{
+            var visibleUsage = (Model.LatestUsage ?? new List<AIUsageTracker.Core.Models.ProviderUsage>())
+                .Where(u => Model.ShowInactiveProviders || u.IsAvailable)
+                .ToList();
+
+            var currencyProviders = visibleUsage
+                .OfType<QuotaProviderUsage>()
+                .Where(u => u.IsCurrencyUsage && u.IsAvailable)
+                .ToList();
+            var totalSpent = currencyProviders.Sum(u => u.RequestsUsed);
+            var totalBudget = currencyProviders.Sum(u => u.RequestsAvailable);
+            var spentPercent = totalBudget > 0 ? (totalSpent / totalBudget) * 100.0 : 0;
+        }
+
+        @if (currencyProviders.Count > 0)
+        {
+            <div class="section-header">
+                <h2 class="mb-2">Spending Overview</h2>
+            </div>
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <h3>Total Spent</h3>
+                    <div class="stat-value @GetUsageClass(spentPercent)">$@totalSpent.ToString("F2")</div>
+                </div>
+                <div class="stat-card">
+                    <h3>Total Budget</h3>
+                    <div class="stat-value">$@totalBudget.ToString("F2")</div>
+                </div>
+                <div class="stat-card">
+                    <h3>Currency Providers</h3>
+                    <div class="stat-value">@currencyProviders.Count</div>
+                </div>
+            </div>
+        }
+
+        @if (visibleUsage.Count > 0)
+        {
+            <div class="section-header">
+                <h2 class="mb-2">Provider Reliability</h2>
+            </div>
+            <div class="reliability-grid">
+                @foreach (var usage in visibleUsage)
+                {
+                    var hasReliability = Model.ReliabilityByProvider.TryGetValue(usage.ProviderId, out var reliability);
+                    var snapshot = hasReliability && reliability != null
+                        ? reliability
+                        : AIUsageTracker.Core.Models.ProviderReliabilitySnapshot.Unavailable("No history");
+                    var successRate = snapshot.IsAvailable
+                        ? Math.Clamp(100 - snapshot.FailureRatePercent, 0, 100)
+                        : 0;
+                    var failureClass = GetFailureClass(snapshot.FailureRatePercent);
+                    <div class="reliability-card">
+                        <div class="reliability-header">
+                            <span class="provider-name">@usage.ProviderName</span>
+                            <span class="reliability-badge @GetReliabilityClass(snapshot)">
+                                @GetReliabilityLabel(snapshot)
+                            </span>
+                        </div>
+                        @if (snapshot.IsAvailable)
+                        {
+                            <div class="reliability-metric">
+                                <div class="reliability-row">
+                                    <span>Success Rate</span>
+                                    <span>@successRate.ToString("F1")%</span>
+                                </div>
+                                <div class="reliability-progress">
+                                    <div class="reliability-progress-bar success" style="width: @successRate%"></div>
+                                </div>
+                            </div>
+                            <div class="reliability-metric">
+                                <div class="reliability-row">
+                                    <span>Failure Rate</span>
+                                    <span>@snapshot.FailureRatePercent.ToString("F1")%</span>
+                                </div>
+                                <div class="reliability-progress">
+                                    <div class="reliability-progress-bar @failureClass" style="width: @snapshot.FailureRatePercent%"></div>
+                                </div>
+                            </div>
+                        }
+                        <div class="reliability-row">
+                            <span>Avg Latency</span>
+                            <span>@GetLatencyText(snapshot)</span>
+                        </div>
+                        <div class="reliability-row">
+                            <span>Last Success</span>
+                            <span>@GetLastSuccessText(snapshot)</span>
+                        </div>
+                    </div>
+                }
+            </div>
+        }
+
+            <div class="section-header">
+                <h2 class="mb-2">Current Usage</h2>
+                <div class="d-flex gap-2">
+                    <button id="display-mode-btn" class="btn btn-secondary btn-sm" data-show-used="@(Model.ShowUsedPercentage.ToString().ToLower())">
+                        @(Model.ShowUsedPercentage ? "Show Remaining %" : "Show Used %")
+                    </button>
+                    <a class="btn btn-secondary btn-sm" href="/?showInactive=@((!Model.ShowInactiveProviders).ToString().ToLower())&showUsed=@(Model.ShowUsedPercentage.ToString().ToLower())">
+                        @(Model.ShowInactiveProviders ? "Hide Inactive" : "Show Inactive")
+                    </a>
+                    <a class="btn btn-secondary btn-sm @(Model.EnableExperimentalAnomalyDetection ? "btn-experimental-on" : "")"
+                       href="/?showInactive=@(Model.ShowInactiveProviders.ToString().ToLower())&showUsed=@(Model.ShowUsedPercentage.ToString().ToLower())&expAnomaly=@((!Model.EnableExperimentalAnomalyDetection).ToString().ToLower())"
+                       title="Experimental feature. Disabled by default.">
+                        @(Model.EnableExperimentalAnomalyDetection ? "Disable Anomaly Detection (Exp)" : "Enable Anomaly Detection (Exp)")
+                    </a>
+                </div>
+            </div>
+
+        @if (visibleUsage.Count == 0)
+        {
+            <div class="alert alert-info">
+                @(Model.ShowInactiveProviders
+                    ? "No usage data available. The Monitor may still be collecting data."
+                    : "No active providers to display. Enable 'Show Inactive' to view all providers.")
+            </div>
+        }
+        else
+        {
+            <div class="provider-grid">
+                @foreach (var usage in visibleUsage)
+                {
+                    var qUsage = usage as QuotaProviderUsage;
+                    var wUsage = usage as WindowedProviderUsage;
+                    var isStatusOnly = qUsage?.IsStatusOnly ?? false;
+                    var hasUsableMetrics = usage.IsAvailable && !isStatusOnly;
+                    var hasForecast = Model.ForecastsByProvider.TryGetValue(usage.ProviderId, out var forecast);
+                    var hasAnomaly = Model.AnomaliesByProvider.TryGetValue(usage.ProviderId, out var anomalySnapshot);
+                    var anomaly = hasAnomaly && anomalySnapshot != null
+                        ? anomalySnapshot
+                        : AIUsageTracker.Core.Models.UsageAnomalySnapshot.Unavailable("Insufficient history");
+
+                    var displayPercentage = Model.ShowUsedPercentage
+                        ? qUsage?.UsedPercent ?? 0
+                        : qUsage?.RemainingPercent ?? 0;
+
+                    // Calculate used percentage for color (always based on used, regardless of toggle)
+                    var usedPercentage = qUsage?.UsedPercent ?? 0;
+
+                    if (!hasUsableMetrics)
+                    {
+                        displayPercentage = 0;
+                    }
+
+                    displayPercentage = Math.Clamp(displayPercentage, 0, 100);
+                    
+                    var usageText = "";
+                    if (qUsage?.DisplayAsFraction ?? false)
+                    {
+                        if (Model.ShowUsedPercentage)
+                        {
+                            usageText = $"{(qUsage?.RequestsUsed ?? 0):N0} / {(qUsage?.RequestsAvailable ?? 0):N0} used";
+                        }
+                        else
+                        {
+                            var remaining = (qUsage?.RequestsAvailable ?? 0) - (qUsage?.RequestsUsed ?? 0);
+                            usageText = $"{remaining:N0} / {(qUsage?.RequestsAvailable ?? 0):N0} remaining";
+                        }
+                    }
+                    else
+                    {
+                        if (!hasUsableMetrics)
+                        {
+                            usageText = "No usage data";
+                        }
+                        else
+                        {
+                            var modeText = Model.ShowUsedPercentage ? "used" : "remaining";
+                            usageText = $"{displayPercentage:F1}% {modeText}";
+                        }
+                    }
+                    
+                    <div class="provider-card">
+                        <div class="provider-header">
+                            <span class="provider-name">@usage.ProviderName</span>
+                            <span class="provider-status @(usage.IsAvailable ? "active" : "inactive")">
+                                @(usage.IsAvailable ? "Active" : "Inactive")
+                            </span>
+                        </div>
+                        
+                        @{
+                            bool hasDual = TryGetDualWindowPercentages(out var pUsed, out var sUsed, out var pName, out var sName);
+                        }
+
+                        <div class="progress-container">
+                            <div class="progress-bar-bg">
+                                @if (hasDual)
+                                {
+                                    var pDisplay = Model.ShowUsedPercentage ? pUsed : (100.0 - pUsed);
+                                    var sDisplay = Model.ShowUsedPercentage ? sUsed : (100.0 - sUsed);
+                                    <div class="progress-bar-stack">
+                                        <div class="progress-bar-fill primary @GetProgressClass(pUsed)" 
+                                             style="width: @pDisplay.ToString("F1", System.Globalization.CultureInfo.InvariantCulture)%">
+                                        </div>
+                                        <div class="progress-bar-fill secondary @GetProgressClass(sUsed)" 
+                                             style="width: @sDisplay.ToString("F1", System.Globalization.CultureInfo.InvariantCulture)%">
+                                        </div>
+                                    </div>
+                                }
+                                else
+                                {
+                                    <div class="progress-bar-fill @GetProgressClass(usedPercentage)" 
+                                         style="width: @displayPercentage.ToString("F1", System.Globalization.CultureInfo.InvariantCulture)%">
+                                    </div>
+                                }
+                            </div>
+                            <div class="progress-text @(hasDual ? "dual" : "")">
+                                @if (hasDual)
+                                {
+                                    <div class="progress-text-row">
+                                        <span class="progress-text-label">@pName</span>
+                                        <span class="progress-text-value">@(Model.ShowUsedPercentage ? pUsed.ToString("F0") : (100-pUsed).ToString("F0"))%</span>
+                                    </div>
+                                    <div class="progress-text-row">
+                                        <span class="progress-text-label">@sName</span>
+                                        <span class="progress-text-value">@(Model.ShowUsedPercentage ? sUsed.ToString("F0") : (100-sUsed).ToString("F0"))%</span>
+                                    </div>
+                                }
+                                else
+                                {
+                                    <span>@usageText</span>
+                                    <span>@usage.Description</span>
+                                }
+                            </div>
+                            @if (!hasDual && qUsage?.NextResetTime is DateTime nextResetTime)
+                            {
+                                <div class="reset-time">
+                                    Resets: @nextResetTime.ToString("MMM d, HH:mm") (@GetRelativeTimeString(nextResetTime))
+                                </div>
+                            }
+                            @if (hasUsableMetrics && hasForecast && forecast != null)
+                            {
+                                <div class="forecast-time @(forecast.IsAvailable ? "available" : "unavailable")">
+                                    Forecast: @GetForecastText(forecast)
+                                </div>
+                            }
+                            @if (Model.EnableExperimentalAnomalyDetection && hasUsableMetrics)
+                            {
+                                <div class="anomaly-time @GetAnomalyClass(anomaly)">
+                                    Anomaly (exp): @GetAnomalyText(anomaly)
+                                </div>
+                            }
+                        </div>
+                        
+                        @if (hasUsableMetrics && Model.SparklineData.TryGetValue(usage.ProviderId, out var sparkPoints) && sparkPoints.Count > 1)
+                        {
+                            var w = 100.0;
+                            var h = 24.0;
+                            var step = w / (sparkPoints.Count - 1);
+                            var pts = sparkPoints.Select((v, i) => $"{(i * step).ToString("F1", System.Globalization.CultureInfo.InvariantCulture)},{(h - (v / 100.0 * h)).ToString("F1", System.Globalization.CultureInfo.InvariantCulture)}");
+                            <svg class="sparkline" viewBox="0 0 @w.ToString("F0") @h.ToString("F0")" preserveAspectRatio="none" width="100%" height="@h.ToString("F0")">
+                                <polyline points="@string.Join(" ", pts)" fill="none" stroke="currentColor" stroke-width="1.5" />
+                            </svg>
+                        }
+                        
+                        @{
+                            // For flat-card providers, show sibling cards in the same group as sub-rows.
+                            var siblingCards = !string.IsNullOrEmpty(wUsage?.GroupId) && wUsage?.CardId != null
+                                ? (Model.LatestUsage ?? new List<AIUsageTracker.Core.Models.ProviderUsage>())
+                                    .Where(u => u is WindowedProviderUsage w2
+                                        && string.Equals(w2.GroupId, wUsage.GroupId, StringComparison.OrdinalIgnoreCase)
+                                        && !string.Equals(w2.CardId, wUsage.CardId, StringComparison.OrdinalIgnoreCase))
+                                    .ToList()
+                                : new List<AIUsageTracker.Core.Models.ProviderUsage>();
+                        }
+                        @if (siblingCards.Count > 0)
+                        {
+                            <div class="sub-providers-container">
+                                <button class="sub-providers-toggle" onclick="toggleSubProviders('@wUsage?.GroupId')">
+                                    <span id="toggle-icon-@(wUsage?.GroupId)">▼</span>
+                                    <span id="toggle-text-@(wUsage?.GroupId)">Hide @(siblingCards.Count) cards</span>
+                                </button>
+                                <div id="sub-providers-@(wUsage?.GroupId)" class="sub-providers">
+                                    @foreach (var sibling in siblingCards)
+                                    {
+                                        var sibQuota = sibling as QuotaProviderUsage;
+                                        var sibWindow = sibling as WindowedProviderUsage;
+                                        var showUsed = Model.ShowUsedPercentage;
+                                        var sibUsedPct = sibQuota?.UsedPercent ?? 0;
+                                        var sibRemPct = sibQuota?.RemainingPercent ?? 0;
+                                        var displayVal = showUsed
+                                            ? sibUsedPct.ToString("F0") + "% used"
+                                            : sibRemPct.ToString("F0") + "% remaining";
+
+                                        <div class="sub-provider-row">
+                                            <span class="sub-provider-name">@(sibWindow?.Name ?? sibWindow?.CardId)</span>
+                                            <span class="sub-provider-value">@displayVal</span>
+                                            @if (sibQuota?.NextResetTime is DateTime sibNextReset)
+                                            {
+                                                <span class="sub-provider-reset">(@GetRelativeTimeString(sibNextReset))</span>
+                                            }
+                                        </div>
+                                    }
+                                </div>
+                            </div>
+                        }
+                        
+                        <div class="mt-2">
+                            <a href="/provider/@usage.ProviderId" class="btn btn-secondary btn-sm">View Details</a>
+                        </div>
+                    </div>
+                }
+            </div>
+        }
+
+        @* Experimental Budget Policies Section *@
+        @if (Model.BudgetStatuses.Any())
+        {
+            <div class="section-header">
+                <h2 class="mb-2">Budget Status <span class="badge badge-experimental">Experimental</span></h2>
+            </div>
+            <div class="budget-grid">
+                @foreach (var budget in Model.BudgetStatuses)
+                {
+                    var budgetClass = GetBudgetClass(budget.IsOverBudget, budget.IsWarning);
+                    <div class="budget-card @budgetClass">
+                        <div class="budget-header">
+                            <span class="budget-name">@budget.ProviderName</span>
+                            <span class="budget-period">@budget.Period</span>
+                        </div>
+                        <div class="budget-amounts">
+                            <span class="current">$@budget.CurrentSpend.ToString("F2")</span>
+                            <span class="separator">/</span>
+                            <span class="limit">$@budget.BudgetLimit.ToString("F2")</span>
+                        </div>
+                        <div class="budget-progress">
+                            <div class="budget-progress-bar @budgetClass" style="width: @Math.Min(budget.UtilizationPercent, 100)%"></div>
+                        </div>
+                        <div class="budget-status">
+                            @if (budget.IsOverBudget)
+                            {
+                                <span class="status-over">Over budget by $@(budget.CurrentSpend - budget.BudgetLimit)</span>
+                            }
+                            else if (budget.IsWarning)
+                            {
+                                <span class="status-warning">$@budget.RemainingBudget.ToString("F2") remaining (warning)</span>
+                            }
+                            else
+                            {
+                                <span class="status-healthy">$@budget.RemainingBudget.ToString("F2") remaining</span>
+                            }
+                        </div>
+                    </div>
+                }
+            </div>
+        }
+
+        @* Experimental Comparison Section *@
+        @if (Model.UsageComparisons.Any())
+        {
+            <div class="section-header">
+                <h2 class="mb-2">Usage Comparison <span class="badge badge-experimental">Experimental</span></h2>
+            </div>
+            <div class="comparison-grid">
+                @foreach (var comparison in Model.UsageComparisons.Take(12))
+                {
+                    var changeClass = GetChangeClass(comparison.ChangeAbsolute);
+                    <div class="comparison-card">
+                        <div class="comparison-header">
+                            <span class="provider-name">@comparison.ProviderName</span>
+                            <span class="period-label">@comparison.PeriodStart.ToString("MMM d") - @comparison.PeriodEnd.ToString("MMM d")</span>
+                        </div>
+                        <div class="comparison-values">
+                            <div class="current">
+                                <span class="label">This Period</span>
+                                <span class="value">$@comparison.CurrentPeriodUsage.ToString("F2")</span>
+                            </div>
+                            <div class="previous">
+                                <span class="label">Previous</span>
+                                <span class="value">$@comparison.PreviousPeriodUsage.ToString("F2")</span>
+                            </div>
+                        </div>
+                        <div class="comparison-change @changeClass">
+                            <span class="direction">@comparison.ChangeDirection</span>
+                            <span class="amount">$@Math.Abs(comparison.ChangeAbsolute).ToString("F2")</span>
+                            <span class="percent">(@comparison.ChangePercent.ToString("F1")%)</span>
+                        </div>
+                    </div>
+                }
+            </div>
+        }
+    </div>
+</div>
+
+<script>
+    function toggleSubProviders(providerId) {
+        const container = document.getElementById('sub-providers-' + providerId);
+        const icon = document.getElementById('toggle-icon-' + providerId);
+        const text = document.getElementById('toggle-text-' + providerId);
+        const count = container.querySelectorAll('.sub-provider-row').length;
+        
+        if (container.classList.contains('collapsed')) {
+            container.classList.remove('collapsed');
+            icon.textContent = '▼';
+            text.textContent = 'Hide ' + count + ' models';
+            localStorage.setItem('subproviders-' + providerId + '-collapsed', 'false');
+        } else {
+            container.classList.add('collapsed');
+            icon.textContent = '▶';
+            text.textContent = 'Show ' + count + ' models';
+            localStorage.setItem('subproviders-' + providerId + '-collapsed', 'true');
+        }
+    }
+    
+    // Restore collapsed state on page load
+    document.addEventListener('DOMContentLoaded', function() {
+        document.querySelectorAll('.sub-providers').forEach(function(container) {
+            const providerId = container.id.replace('sub-providers-', '');
+            const isCollapsed = localStorage.getItem('subproviders-' + providerId + '-collapsed') === 'true';
+            if (isCollapsed) {
+                container.classList.add('collapsed');
+                const icon = document.getElementById('toggle-icon-' + providerId);
+                const text = document.getElementById('toggle-text-' + providerId);
+                const count = container.querySelectorAll('.sub-provider-row').length;
+                if (icon) icon.textContent = '▶';
+                if (text) text.textContent = 'Show ' + count + ' models';
+            }
+        });
+        
+        const btn = document.getElementById('display-mode-btn');
+                if (btn) {
+            // Load saved preference
+            const savedMode = localStorage.getItem('showUsedPercentage');
+            if (savedMode !== null) {
+                const showUsed = savedMode === 'true';
+                btn.setAttribute('data-show-used', showUsed);
+                btn.textContent = showUsed ? 'Show Remaining %' : 'Show Used %';
+            }
+            
+            btn.addEventListener('click', function() {
+                const currentShowUsed = this.getAttribute('data-show-used') === 'true';
+                const newShowUsed = !currentShowUsed;
+                localStorage.setItem('showUsedPercentage', newShowUsed);
+                this.setAttribute('data-show-used', newShowUsed);
+                this.textContent = newShowUsed ? 'Show Remaining %' : 'Show Used %';
+                const params = new URLSearchParams(window.location.search);
+                params.set('showUsed', newShowUsed);
+                if (!params.has('showInactive')) {
+                    params.set('showInactive', '@(Model.ShowInactiveProviders.ToString().ToLower())');
+                }
+                window.location.href = window.location.pathname + '?' + params.toString();
+                htmx.trigger('#dashboard-content', 'refresh');
+            });
+        }
+    });
+</script>
+
+@functions {
+    static string GetFailureClass(double failureRatePercent)
+    {
+        if (failureRatePercent >= 20) return "critical";
+        if (failureRatePercent >= 5) return "warning";
+        return "success";
+    }
+
+    static string GetBudgetClass(bool isOverBudget, bool isWarning)
+    {
+        if (isOverBudget) return "over-budget";
+        if (isWarning) return "warning";
+        return "healthy";
+    }
+
+    static string GetChangeClass(double changeAbsolute)
+    {
+        if (changeAbsolute > 0) return "increase";
+        if (changeAbsolute < 0) return "decrease";
+        return "neutral";
+    }
+
+    string GetUsageClass(double usage)
+    {
+        var tier = UsageMath.GetThresholdTier(usage, Model.ColorThresholdYellow, Model.ColorThresholdRed);
+        return tier switch
+        {
+            ThresholdTier.Red => "danger",
+            ThresholdTier.Yellow => "warning",
+            _ => "success"
+        };
+    }
+
+    string GetProgressClass(double usedPercentage)
+    {
+        var tier = UsageMath.GetThresholdTier(usedPercentage, Model.ColorThresholdYellow, Model.ColorThresholdRed);
+        return tier switch
+        {
+            ThresholdTier.Red => "high",
+            ThresholdTier.Yellow => "medium",
+            _ => "low"
+        };
+    }
+
+    static string GetLastUpdateDisplay(string? lastUpdate)
+    {
+        if (string.IsNullOrWhiteSpace(lastUpdate))
+        {
+            return "Never";
+        }
+
+        if (DateTime.TryParse(lastUpdate, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var parsed))
+        {
+            return parsed.ToString("g");
+        }
+
+        if (long.TryParse(lastUpdate, System.Globalization.CultureInfo.InvariantCulture, out var unixValue))
+        {
+            try
+            {
+                var localDateTime = unixValue > 9999999999
+                    ? DateTimeOffset.FromUnixTimeMilliseconds(unixValue).LocalDateTime
+                    : DateTimeOffset.FromUnixTimeSeconds(unixValue).LocalDateTime;
+                return localDateTime.ToString("g");
+            }
+            catch (ArgumentOutOfRangeException)
+            {
+                return "Never";
+            }
+        }
+
+        return "Never";
+    }
+
+    static string GetRelativeTimeString(DateTime nextReset)
+    {
+        var diff = nextReset - DateTime.Now;
+        
+        if (diff.TotalSeconds <= 0) return "0m";
+        if (diff.TotalDays >= 1) return $"{diff.Days}d {diff.Hours}h";
+        if (diff.TotalHours >= 1) return $"{diff.Hours}h {diff.Minutes}m";
+        return $"{Math.Max(1, (int)Math.Ceiling(diff.TotalMinutes))}m";
+    }
+
+    static string GetForecastText(AIUsageTracker.Core.Models.BurnRateForecast forecast)
+    {
+        if (!forecast.IsAvailable)
+        {
+            return "collecting trend data";
+        }
+
+        if (forecast.DaysUntilExhausted <= 0)
+        {
+            return "exhausted";
+        }
+
+        var burnRateText = forecast.BurnRatePerDay >= 1
+            ? forecast.BurnRatePerDay.ToString("F2")
+            : forecast.BurnRatePerDay.ToString("F3");
+
+        if (forecast.DaysUntilExhausted >= 3650)
+        {
+            return $"slow burn (~{burnRateText}/day)";
+        }
+
+        if (forecast.DaysUntilExhausted >= 2)
+        {
+            return $"~{forecast.DaysUntilExhausted:F1} days left ({burnRateText}/day)";
+        }
+
+        var hours = Math.Max(1, (int)Math.Ceiling(forecast.DaysUntilExhausted * 24));
+        return $"~{hours}h left ({burnRateText}/day)";
+    }
+
+    static string GetReliabilityClass(AIUsageTracker.Core.Models.ProviderReliabilitySnapshot snapshot)
+    {
+        if (!snapshot.IsAvailable)
+        {
+            return "unknown";
+        }
+
+        return snapshot.FailureRatePercent switch
+        {
+            <= 5 => "healthy",
+            <= 20 => "warning",
+            _ => "critical"
+        };
+    }
+
+    static string GetReliabilityLabel(AIUsageTracker.Core.Models.ProviderReliabilitySnapshot snapshot)
+    {
+        if (!snapshot.IsAvailable)
+        {
+            return "No Data";
+        }
+
+        return snapshot.FailureRatePercent switch
+        {
+            <= 5 => "Healthy",
+            <= 20 => "Watch",
+            _ => "At Risk"
+        };
+    }
+
+    static string GetLatencyText(AIUsageTracker.Core.Models.ProviderReliabilitySnapshot snapshot)
+    {
+        if (!snapshot.IsAvailable || snapshot.AverageLatencyMs <= 0)
+        {
+            return "n/a";
+        }
+
+        if (snapshot.AverageLatencyMs >= 1000)
+        {
+            return $"{snapshot.AverageLatencyMs / 1000:F2}s";
+        }
+
+        return $"{snapshot.AverageLatencyMs:F0}ms";
+    }
+
+    static string GetLastSuccessText(AIUsageTracker.Core.Models.ProviderReliabilitySnapshot snapshot)
+    {
+        if (!snapshot.IsAvailable || !snapshot.LastSuccessfulSyncUtc.HasValue)
+        {
+            return "none in window";
+        }
+
+        var utc = snapshot.LastSuccessfulSyncUtc.Value;
+        return $"{utc.ToLocalTime():MMM d, HH:mm} ({GetElapsedSinceString(utc)})";
+    }
+
+    static string GetElapsedSinceString(DateTime timestampUtc)
+    {
+        var diff = DateTime.UtcNow - timestampUtc.ToUniversalTime();
+
+        if (diff.TotalSeconds <= 0) return "just now";
+        if (diff.TotalDays >= 1) return $"{(int)diff.TotalDays}d {diff.Hours}h ago";
+        if (diff.TotalHours >= 1) return $"{(int)diff.TotalHours}h {diff.Minutes}m ago";
+        return $"{Math.Max(1, (int)Math.Ceiling(diff.TotalMinutes))}m ago";
+    }
+
+    static string GetAnomalyClass(AIUsageTracker.Core.Models.UsageAnomalySnapshot snapshot)
+    {
+        if (!snapshot.IsAvailable)
+        {
+            return "unavailable";
+        }
+
+        return snapshot.HasAnomaly ? "detected" : "stable";
+    }
+
+    static string GetAnomalyText(AIUsageTracker.Core.Models.UsageAnomalySnapshot snapshot)
+    {
+        if (!snapshot.IsAvailable)
+        {
+            return "collecting baseline";
+        }
+
+        if (!snapshot.HasAnomaly)
+        {
+            return "none detected";
+        }
+
+        var latestText = snapshot.LatestRatePerDay >= 1
+            ? snapshot.LatestRatePerDay.ToString("F2")
+            : snapshot.LatestRatePerDay.ToString("F3");
+        var baselineText = snapshot.BaselineRatePerDay >= 1
+            ? snapshot.BaselineRatePerDay.ToString("F2")
+            : snapshot.BaselineRatePerDay.ToString("F3");
+        var direction = snapshot.Direction.Equals("Drop", StringComparison.OrdinalIgnoreCase) ? "drop" : "spike";
+        var severity = snapshot.Severity.ToLowerInvariant();
+
+        return $"{direction} ({severity}) {latestText}/day vs {baselineText}/day";
+    }
+
+    static bool TryGetDualWindowPercentages(out double primaryUsed, out double secondaryUsed, out string primaryName, out string secondaryName)
+    {
+        // Dual-window data now comes from flat ProviderUsage cards (WindowKind != None).
+        // The web page operates on root ProviderUsage objects which no longer carry sub-details.
+        primaryUsed = 0;
+        secondaryUsed = 0;
+        primaryName = "";
+        secondaryName = "";
+        return false;
+    }
+}

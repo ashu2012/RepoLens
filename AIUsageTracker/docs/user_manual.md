@@ -1,0 +1,309 @@
+# AI Consumption Tracker - User Manual
+
+Welcome to the **AI Consumption Tracker** user manual. This guide covers the Slim desktop UI pages, Web UI pages, and the command-line interface (`act`) so you can monitor and manage provider usage quickly.
+
+## Concise Feature List
+
+- Unified provider dashboard across Slim UI, Web UI, and CLI.
+- Real-time usage/quota refresh with tray-friendly compact monitoring.
+- Pace-aware quota colouring for rolling windows with an `On pace` badge when usage is below expected elapsed pace.
+- Toggleable display mode for used vs remaining percentages.
+- Optional usage-rate badge (`req/hr`) on provider cards.
+- Provider-level and global Windows notification controls (threshold + quiet hours + test action).
+- Theme system with shared Slim/Web catalog and persistent preferences.
+- Built-in key discovery from environment variables and common local auth/config files.
+- Historical charts, raw usage views, and export options for troubleshooting.
+
+## Auto-Generated Screenshots
+
+The screenshots in this document are generated from the app's deterministic headless screenshot flow used by CI/CD, so the visuals stay aligned with current UI behavior.
+
+- Dashboard: `docs/screenshot_dashboard_privacy.png`
+- Settings > Providers: `docs/screenshot_settings_providers_privacy.png`
+- Settings > Layout: `docs/screenshot_settings_layout_privacy.png`
+- Settings > History: `docs/screenshot_settings_history_privacy.png`
+- Settings > Monitor: `docs/screenshot_settings_monitor_privacy.png`
+- Info dialog: `docs/screenshot_info_privacy.png`
+- Web Providers: `docs/screenshot_web_providers.png`
+
+---
+
+## 1. Slim UI Pages
+
+### Main Dashboard Page
+
+![Dashboard](screenshot_dashboard_privacy.png)
+
+The main dashboard provides a real-time overview of your AI usage across various providers. It is designed to be lightweight and stay out of your way. For rolling-window quotas, cards can show an `On pace` badge and pace-adjusted color state when enabled in Layout settings.
+
+### Top Bar & Window Controls
+- **Draggable Header**: Move the window by clicking and dragging the top dark bar.
+- **Close (X)**: Closes the window. The app continues running in the system tray.
+
+### Dashboard Controls (Footer)
+- **Show All**: When disabled, only providers with active usage are shown.
+- **Always on Top**: Keeps the dashboard above all other windows.
+- **Stay Open (Pin)**: If unpinned, the window hides when it loses focus.
+- **Compact View**: Condensed layout for minimal screen space.
+- **Privacy Mode (🔒)**: Masks sensitive information like names and token counts.
+- **Refresh (🔄)**: Immediate update of all provider data.
+
+### Tray Context Menu
+
+Right-clicking the tray icon opens quick actions for:
+- show/hide dashboard
+- open settings
+- manual refresh
+- exit the app
+
+### Info Dialog
+
+![Info Dialog](screenshot_info_privacy.png)
+
+The Info dialog shows application/version details and helpful links for troubleshooting and configuration paths.
+
+---
+
+## 2. Settings & Configuration
+
+The **Settings** window (⚙️ icon) is where you manage your AI providers and application preferences.
+
+### Providers Tab
+
+![Settings Providers](screenshot_settings_providers_privacy.png)
+
+Configure API keys for OpenAI, Anthropic, Gemini, etc.
+- **Tray**: Add a dedicated system tray icon for a specific provider.
+- **Notify**: Enable Windows notifications for that provider's quota events.
+- **Scan for Keys**: Automatically discover keys from environment variables and other apps (VS Code, GitHub, Claude Code, Roo Code).
+
+### Layout Tab
+
+![Settings Layout](screenshot_settings_layout_privacy.png)
+
+- **Auto Refresh (Minutes)**: How often the app refreshes in the background (0 = Disabled).
+- **Show Used Percentages**:
+  - Enabled: show used percentage values.
+  - Disabled (default): show remaining percentage values for quota-style providers.
+- **Show Usage Rate (req/hr)**: show a live burn-rate badge when enough history exists.
+- **Pace-Aware Quota Colours**:
+  - Enabled (default): rolling-window cards use elapsed-time pace for color/threshold evaluation and can show `On pace`.
+  - Disabled: color and threshold evaluation use raw used percentage only.
+- **Color Thresholds**: yellow/red thresholds for usage warnings.
+- **Font Settings**: Customize font family, size, and style for the dashboard.
+
+### Notifications Tab
+
+- **Enable Windows notifications**: Global on/off switch.
+- **Notify at (%)**: Threshold for usage alerts.
+- **Event toggles**: Usage threshold and quota reset/exceeded events.
+- **Quiet hours**: Suppress notifications in a configured time range.
+- **Send Test Notification**: Verify end-to-end notification delivery.
+
+### History Tab
+
+![Settings History](screenshot_settings_history_privacy.png)
+
+Shows recent usage snapshots and provider history in one place for quick troubleshooting and trend checks.
+
+### Monitor Tab
+
+![Settings Monitor](screenshot_settings_monitor_privacy.png)
+
+Contains monitor-specific options for background refresh behavior and integration settings.
+
+### Data Export
+Click the **"Export Data"** button in Settings to save your usage history as **CSV** or **JSON**.
+
+---
+
+## 3. Web UI Pages
+
+The Web UI provides a browser-based view over Agent-collected data.
+
+### Web Dashboard
+
+High-level provider status cards, quotas/usage summaries, and periodic auto-refresh.
+
+### Web Providers
+
+![Web Providers](screenshot_web_providers.png)
+
+Tabular provider listing with availability and current usage details.
+
+### Web Charts
+
+Historical charts with server-side downsampling for fast rendering over longer date ranges.
+
+---
+
+## 4. Command Line Interface (`act`)
+
+The `act` command allows you to manage everything from your terminal. It communicates with the background Agent service.
+
+### Basic Syntax
+```bash
+act <command> [options]
+```
+
+### Core Commands
+
+| Command | Description | Options |
+|:---|:---|:---|
+| `status` | Show current usage table | `--all`, `--json` |
+| `history` | Show recent usage history | `[days]` (default 7), `--json` |
+| `list` | List configured providers | `--json` |
+| `check` | Test provider connections | `[provider-id]` (optional) |
+| `export` | Export history to file | `--format <csv/json>`, `--days <N>`, `--output <file>` |
+| `scan` | Discover keys automatically | |
+| `set-key` | Add/Update an API key | `<provider-id> <api-key>` |
+| `remove-key` | Remove a provider key | `<provider-id>` |
+| `config` | Manage preferences | `[key] [value]` |
+| `monitor` | Manage background service | `start`, `stop`, `restart`, `info` |
+
+#### Examples
+- **Check connection** to all providers: `act check`
+- **Export last 30 days** to JSON: `act export --format json --days 30 --output my_data.json`
+- **Change threshold** via CLI: `act config NotificationThreshold 85`
+- **View raw JSON** status: `act status --json`
+
+---
+
+## 5. System Notifications
+
+The application uses native Windows 11 notifications to alert you about critical usage changes.
+
+### Triggered Events
+- **High Usage**: When a provider exceeds your configured threshold (e.g., >90%).
+- **Quota Depleted**: When usage hits 100% or credits reach $0.00.
+- **Reset/Refill**: When a quota is reset (e.g., at the start of a new billing cycle).
+
+### Configuration
+1. Enable **Notifications** globally in the **Notifications** tab.
+2. Set your desired **Usage Threshold** (Default 90%).
+3. (Optional) Disable individual providers by unchecking **"Notify"** in the **Providers** tab.
+
+---
+
+## 6. API Key Discovery
+
+The application automatically searches multiple locations to save you time.
+
+### Supported Discovery Sources
+### Discovery Sources & Paths
+
+#### Environment Variables
+The application searches for the following variables in your system:
+
+| Provider | Environment Variable | Alternate Variable |
+|:---|:---|:---|
+| **Anthropic** | `ANTHROPIC_API_KEY` | `CLAUDE_API_KEY` |
+| **OpenAI** | `OPENAI_API_KEY` | |
+| **Minimax** | `MINIMAX_API_KEY` | |
+| **Kimi** | `KIMI_API_KEY` | `MOONSHOT_API_KEY` |
+| **Xiaomi** | `XIAOMI_API_KEY` | `MIMO_API_KEY` |
+| **OpenRouter** | `OPENROUTER_API_KEY` | |
+
+#### Scanned File Paths
+Keys are also discovered from these standard locations:
+
+| Source | File Path / Location |
+|:---|:---|
+| **OpenCode** | `%APPDATA%\opencode\auth.json` |
+| | `%LOCALAPPDATA%\opencode\auth.json` |
+| | `~/.local/share/opencode/auth.json` |
+| | `~/.config/opencode/auth.json` |
+| **Kilo Code** | `~/.kilocode/secrets.json` |
+| | `~/.kilocode/cli/config.json` |
+| **Roo Code** | Windows: `%APPDATA%/Code/User/globalStorage/roovetgit.roo-code/` |
+| | macOS: `~/Library/Application Support/Code/User/globalStorage/roovetgit.roo-code/` |
+| | Linux: `~/.config/Code/User/globalStorage/roovetgit.roo-code/` |
+| | `~/.roo/secrets.json` |
+#### Native Authentication
+For certain providers, the application provides a built-in login workflow that doesn't require discovery or manual key entry:
+
+- **GitHub Copilot**: You can log in directly via the **Settings > Providers** tab. Click **"Log in"** to initiate a standard GitHub device authentication flow. This is our recommended way to connect if you don't use the GitHub CLI.
+- **Google Antigravity**: Automatically detected if the monitor is running on your machine. No configuration required.
+
+Click **"Scan for Keys"** in Settings or run `act scan` to trigger discovery from external sources.
+
+---
+
+## 7. Managing API Keys
+
+### Key states
+
+A provider card's appearance reflects the current state of its API key:
+
+| State | Card appearance | What it means |
+|:---|:---|:---|
+| **Active** | Green/yellow/red progress bar | Key is present and working. |
+| **Expired** | Amber warning, "No active subscription" | Key is valid but your subscription or credits are exhausted. The card remains visible so you can see the state. |
+| **Error** | Red, API error message | Key is present but the provider returned an error (e.g. 429 rate limit, 500 server error). |
+| **Not configured** | Card absent from dashboard | No key is set for this provider. Configure one in Settings to show the card. |
+
+### Where to update a key — upstream source first
+
+**This tracker does not own your API keys.** It reads them from wherever you originally stored them: environment variables, Roo Code, OpenCode, Kilo Code, or other tools (see [section 6](#6-api-key-discovery)). The Settings UI key field only holds a local copy for keys that have no external source.
+
+If your key came from an external source, **always update it there first**, then re-scan:
+
+| Original source | Where to rotate the key | Then |
+|:---|:---|:---|
+| Environment variable (e.g. `OPENROUTER_API_KEY`) | Update the variable in your system or shell profile | Re-open terminal / restart service, then `act scan` |
+| Roo Code / Kilo Code config | Update the key inside that tool's settings | Run `act scan` or click **Scan for Keys** |
+| OpenCode `auth.json` | Update via `opencode auth` or edit the file directly | Run `act scan` or click **Scan for Keys** |
+| GitHub Copilot | Re-authenticate inside Settings (click **Log in**) | Automatic |
+
+Updating the key only in the tracker's Settings field will be overwritten on the next scan — the tracker will re-read the old key from the upstream source.
+
+### Replacing an expired key (no external source)
+
+If the key lives only in this tracker (you entered it manually and it is not discovered from any external source), update it here:
+
+**Via Settings UI:**
+1. Open Settings (⚙️) → **Providers** tab.
+2. Find the provider — its card shows the **Inactive** badge.
+3. Paste the new key into the key field.
+4. The card reappears on the dashboard within one refresh cycle.
+
+**Via CLI:**
+```bash
+act set-key <provider-id> <new-api-key>
+# Example:
+act set-key synthetic sk-syn-...
+```
+
+> **Check the auth source first.** The Settings card shows the source of the current key (e.g. "Env: OPENROUTER_API_KEY" or "Roo Code: …"). If a source is shown, update it there instead of overwriting the field here.
+
+### Removing a key you no longer need
+
+If you want to stop tracking a provider entirely, remove its key. The card disappears from the main dashboard immediately; the configuration slot remains in Settings so you can re-add a key later.
+
+**Via Settings UI:**
+1. Open Settings (⚙️) → **Providers** tab.
+2. Clear the key field for the provider (select all, delete).
+3. Close Settings — the card is removed from the dashboard on the next refresh.
+
+**Via CLI:**
+```bash
+act remove-key <provider-id>
+# Example:
+act remove-key openrouter
+```
+
+> **Note:** Removing a key here does not remove it from the upstream source. If the key still exists in an environment variable or external tool config, a future **Scan for Keys** will rediscover it. To fully stop tracking a provider, also remove or unset the key in the upstream source.
+>
+> Removing a key does not delete historical usage data. Past records are preserved and visible in the **History** tab and via `act history`.
+
+---
+
+## 8. Troubleshooting
+
+- **Monitor not running**: The CLI will attempt to auto-start the monitor. If it fails, run `act monitor start` or start the UI application.
+- **Missing Keys**: Use `act check` to see which providers are failing due to missing or invalid keys.
+- **Data Refresh**: If the UI feels stale, check the **Auto Refresh** setting or click the 🔄 button.
+
+---
+
+*Version: 2.3.2 beta series | Author: Alexander Brandt | Updated: 2026-04-12*

@@ -1,0 +1,150 @@
+// <copyright file="ProviderSettingsCatalogTests.cs" company="AIUsageTracker">
+// Copyright (c) AIUsageTracker. All rights reserved.
+// </copyright>
+
+using AIUsageTracker.Core.Models;
+using AIUsageTracker.UI.Slim;
+
+namespace AIUsageTracker.Tests.UI;
+
+public sealed class ProviderSettingsCatalogTests
+{
+    private static readonly string TestApiKey = Guid.NewGuid().ToString();
+
+    [Fact]
+    public void GetInputMode_ReturnsSessionAuth_ForCodexSpark()
+    {
+        var config = new ProviderConfig { ProviderId = "codex.spark", ApiKey = string.Empty };
+
+        var behavior = SettingsWindow.ResolveProviderSettingsBehavior(config, usage: null, isDerived: false);
+
+        Assert.Equal(ProviderInputMode.SessionAuthStatus, behavior.InputMode);
+    }
+
+    [Fact]
+    public void GetInputMode_ReturnsSessionAuth_ForSessionToken()
+    {
+        var config = new ProviderConfig { ProviderId = "openai", ApiKey = TestApiKey };
+
+        var behavior = SettingsWindow.ResolveProviderSettingsBehavior(config, usage: null, isDerived: false);
+
+        Assert.Equal(ProviderInputMode.SessionAuthStatus, behavior.InputMode);
+    }
+
+    [Fact]
+    public void IsInactive_ReturnsTrue_ForStandaloneCodexSparkWithoutAuth()
+    {
+        var config = new ProviderConfig { ProviderId = "codex.spark", ApiKey = string.Empty };
+
+        var behavior = SettingsWindow.ResolveProviderSettingsBehavior(config, usage: null, isDerived: false);
+
+        Assert.True(behavior.IsInactive);
+    }
+
+    [Fact]
+    public void Resolve_ReturnsStandaloneVisibility_ForCodexSpark()
+    {
+        var config = new ProviderConfig { ProviderId = "codex.spark", ApiKey = string.Empty };
+
+        var behavior = SettingsWindow.ResolveProviderSettingsBehavior(config, usage: null, isDerived: false);
+
+        Assert.NotNull(behavior);
+    }
+
+    [Fact]
+    public void Resolve_ReturnsCodexSessionBehavior_ForCodex()
+    {
+        var config = new ProviderConfig { ProviderId = "codex", ApiKey = TestApiKey };
+
+        var behavior = SettingsWindow.ResolveProviderSettingsBehavior(config, usage: null, isDerived: false);
+
+        Assert.Equal(ProviderInputMode.SessionAuthStatus, behavior.InputMode);
+        Assert.Equal("OpenAI (Codex)", behavior.SessionProviderLabel);
+        Assert.False(behavior.IsInactive);
+    }
+
+    [Fact]
+    public void Resolve_ReturnsOpenAiSessionBehavior_ForQuotaBasedOpenAi()
+    {
+        var config = new ProviderConfig { ProviderId = "openai", ApiKey = string.Empty };
+        var usage = new QuotaProviderUsage { ProviderId = "openai", IsQuotaBased = true, IsAvailable = true };
+
+        var behavior = SettingsWindow.ResolveProviderSettingsBehavior(config, usage, isDerived: false);
+
+        Assert.Equal(ProviderInputMode.SessionAuthStatus, behavior.InputMode);
+        Assert.Equal("OpenAI (API)", behavior.SessionProviderLabel);
+        Assert.False(behavior.IsInactive);
+    }
+
+    [Fact]
+    public void BuildSettingsResetStatusLine_OpenAiBurstQuota_UsesWarningColorAnd5hLabel()
+    {
+        var nextReset = new DateTime(2026, 4, 21, 18, 30, 0);
+        var usage = new WindowedProviderUsage
+        {
+            ProviderId = "openai",
+            Name = "5-hour quota",
+            IsQuotaBased = true,
+            IsAvailable = true,
+            PlanType = PlanType.Coding,
+            NextResetTime = nextReset,
+        };
+
+        var line = SettingsWindow.BuildSettingsResetStatusLine(usage, nextReset);
+
+        Assert.Equal($"Next 5h reset: {nextReset:g}", line.Text);
+        Assert.Equal("StatusTextWarning", line.ResourceKey);
+    }
+
+    [Fact]
+    public void BuildSettingsResetStatusLine_MinimaxCodingPlan_UsesUtcTimestamp()
+    {
+        var nextReset = new DateTime(2026, 4, 21, 20, 0, 0, DateTimeKind.Utc);
+        var usage = new WindowedProviderUsage
+        {
+            ProviderId = "minimax-coding-plan",
+            ProviderName = "Minimax.io Coding Plan",
+            Name = "5h",
+            IsQuotaBased = true,
+            IsAvailable = true,
+            PlanType = PlanType.Coding,
+            NextResetTime = nextReset,
+        };
+
+        var line = SettingsWindow.BuildSettingsResetStatusLine(usage, nextReset);
+
+        Assert.Equal("Next 5h reset: Apr 21, 20:00 UTC", line.Text);
+        Assert.Equal("StatusTextWarning", line.ResourceKey);
+    }
+
+    // ── Clear-key removal precondition ────────────────────────────────────────
+    [Theory]
+    [InlineData("deepseek")]
+    [InlineData("mistral")]
+    [InlineData("openrouter")]
+    public void Resolve_ReturnsStandardApiKey_ForStandardProviderWithEmptyKey(string providerId)
+    {
+        // Verifies the precondition for clear-key removal: these providers must resolve
+        // StandardApiKey mode so PersistAllSettingsAsync will call RemoveConfigAsync when
+        // the user wipes the key field instead of saving an empty-key config.
+        var config = new ProviderConfig { ProviderId = providerId, ApiKey = string.Empty };
+
+        var behavior = SettingsWindow.ResolveProviderSettingsBehavior(config, usage: null, isDerived: false);
+
+        Assert.Equal(ProviderInputMode.StandardApiKey, behavior.InputMode);
+    }
+
+    [Theory]
+    [InlineData("deepseek", "sk-abc123")]
+    [InlineData("mistral", "sk-abc123")]
+    public void Resolve_ReturnsStandardApiKey_ForStandardProviderWithKey(string providerId, string apiKey)
+    {
+        // A configured standard provider must also resolve StandardApiKey so clearing
+        // the field (empty string) triggers removal while a non-empty key gets saved.
+        var config = new ProviderConfig { ProviderId = providerId, ApiKey = apiKey };
+
+        var behavior = SettingsWindow.ResolveProviderSettingsBehavior(config, usage: null, isDerived: false);
+
+        Assert.Equal(ProviderInputMode.StandardApiKey, behavior.InputMode);
+    }
+}

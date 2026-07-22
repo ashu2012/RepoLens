@@ -1,0 +1,346 @@
+// <copyright file="OpenRouterProvider.cs" company="AIUsageTracker">
+// Copyright (c) AIUsageTracker. All rights reserved.
+// </copyright>
+
+using System.Globalization;
+using System.Text.Json.Serialization;
+using AIUsageTracker.Core.Models;
+using AIUsageTracker.Core.Providers;
+using Microsoft.Extensions.Logging;
+
+namespace AIUsageTracker.Infrastructure.Providers;
+
+public class OpenRouterProvider : ProviderBase
+{
+    private const string CreditsEndpoint = "https://openrouter.ai/api/v1/credits";
+    private const string KeyEndpoint = "https://openrouter.ai/api/v1/key";
+
+    private readonly HttpClient _httpClient;
+    private readonly ILogger<OpenRouterProvider> _logger;
+
+    public OpenRouterProvider(HttpClient httpClient, ILogger<OpenRouterProvider> logger)
+    {
+        this._httpClient = httpClient;
+        this._logger = logger;
+    }
+
+    public static ProviderDefinition StaticDefinition { get; } = new(
+        "openrouter",
+        "OpenRouter",
+        PlanType.Usage,
+        isQuotaBased: false)
+    {
+        IsCurrencyUsage = true,
+        DiscoveryEnvironmentVariables = new[] { "OPENROUTER_API_KEY" },
+        RooConfigPropertyNames = new[] { "openrouterApiKey" },
+        IconAssetName = "openai",
+        BadgeColorHex = "#483D8B",
+        BadgeInitial = "OR",
+    };
+
+    /// <inheritdoc/>
+    public override ProviderDefinition Definition => StaticDefinition;
+
+    /// <inheritdoc/>
+    public override string ProviderId => StaticDefinition.ProviderId;
+
+    /// <inheritdoc/>
+    public override async Task<IEnumerable<ProviderUsage>> GetUsageAsync(ProviderConfig config, Action<ProviderUsage>? progressCallback = null, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(config);
+
+        this._logger.LogDebug("Starting OpenRouter usage fetch for provider {ProviderId}", config.ProviderId);
+
+        if (string.IsNullOrEmpty(config.ApiKey))
+        {
+            this._logger.LogWarning("OpenRouter API key is missing for provider {ProviderId}", config.ProviderId);
+            return new[]
+            {
+                this.CreateUnavailableUsage(
+                "API Key missing - please configure OPENROUTER_API_KEY",
+                state: ProviderUsageState.Missing),
+            };
+        }
+
+        OpenRouterCreditsResponse? creditsData = null;
+        string? creditsResponseBody = null;
+        int httpStatus;
+
+        try
+        {
+            this._logger.LogDebug("Calling OpenRouter credits API: https://openrouter.ai/api/v1/credits");
+
+            var request = CreateBearerRequest(HttpMethod.Get, CreditsEndpoint, config.ApiKey);
+
+            var response = await this._httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
+            httpStatus = (int)response.StatusCode;
+            creditsResponseBody = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+
+            this._logger.LogDebug("OpenRouter credits API response status: {StatusCode}", response.StatusCode);
+            this._logger.LogTrace("OpenRouter credits API response body: {ResponseBody}", creditsResponseBody);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                this._logger.LogError(
+                    "OpenRouter credits API failed with status {StatusCode}. Response: {Response}",
+                    response.StatusCode,
+                    creditsResponseBody);
+                return new[] { this.CreateUnavailableUsage(DescribeUnavailableStatus(response.StatusCode), (int)response.StatusCode) };
+            }
+
+            try
+            {
+                creditsData = System.Text.Json.JsonSerializer.Deserialize<OpenRouterCreditsResponse>(creditsResponseBody);
+            }
+            catch (Exception ex) when (ex is System.Text.Json.JsonException)
+            {
+                this._logger.LogError(ex, "Failed to deserialize OpenRouter credits response. Raw response: {Response}", creditsResponseBody);
+                return new[]
+                {
+                    this.CreateUnavailableUsage(
+                    "Failed to parse credits response - API format may have changed"),
+                };
+            }
+
+            if (creditsData?.Data == null)
+            {
+                this._logger.LogError("OpenRouter credits response missing 'data' field. Response: {Response}", creditsResponseBody);
+                return new[]
+                {
+                    this.CreateUnavailableUsage(
+                    "Invalid response format - missing data field"),
+                };
+            }
+
+            this._logger.LogDebug(
+                "Successfully parsed credits data - Total: {Total}, Usage: {Usage}",
+                creditsData.Data.TotalCredits,
+                creditsData.Data.TotalUsage);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or System.Text.Json.JsonException)
+        {
+            this._logger.LogError(ex, "Exception while calling OpenRouter credits API");
+            return new[]
+            {
+                this.CreateUnavailableUsage(
+                    DescribeUnavailableException(ex, "Credits API call failed")),
+            };
+        }
+
+        var keyInfo = await this.FetchKeyInfoAsync(config.ApiKey, cancellationToken).ConfigureAwait(false);
+        return this.BuildUsageCards(config, creditsData!, creditsResponseBody!, httpStatus, keyInfo);
+    }
+
+    private async Task<KeyInfoResult> FetchKeyInfoAsync(string apiKey, CancellationToken cancellationToken)
+    {
+        var label = "OpenRouter";
+        double? spendingLimit = null;
+        DateTime? spendingLimitResetTime = null;
+        bool? isFreeTier = null;
+
+        try
+        {
+            this._logger.LogDebug("Calling OpenRouter key API: https://openrouter.ai/api/v1/key");
+
+            var keyRequest = CreateBearerRequest(HttpMethod.Get, KeyEndpoint, apiKey);
+
+            var keyResponse = await this._httpClient.SendAsync(keyRequest, cancellationToken).ConfigureAwait(false);
+            var keyResponseBody = await keyResponse.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+
+            this._logger.LogDebug("OpenRouter key API response status: {StatusCode}", keyResponse.StatusCode);
+            this._logger.LogTrace("OpenRouter key API response body: {ResponseBody}", keyResponseBody);
+
+            if (keyResponse.IsSuccessStatusCode)
+            {
+                OpenRouterKeyResponse? keyData = null;
+
+                try
+                {
+                    keyData = System.Text.Json.JsonSerializer.Deserialize<OpenRouterKeyResponse>(keyResponseBody);
+                }
+                catch (Exception ex) when (ex is System.Text.Json.JsonException)
+                {
+                    this._logger.LogWarning(ex, "Failed to deserialize OpenRouter key response. Response: {Response}", keyResponseBody);
+                }
+
+                if (keyData?.Data != null)
+                {
+                    label = keyData.Data.Label ?? "OpenRouter";
+                    this._logger.LogDebug(
+                        "OpenRouter key label: {Label}, Limit: {Limit}, IsFreeTier: {IsFreeTier}",
+                        label,
+                        keyData.Data.Limit,
+                        keyData.Data.IsFreeTier);
+
+                    if (keyData.Data.Limit > 0)
+                    {
+                        spendingLimit = keyData.Data.Limit;
+                        spendingLimitResetTime = TryParseLimitResetTime(keyData.Data.LimitReset);
+                    }
+                    else
+                    {
+                        this._logger.LogDebug("No spending limit set for this key");
+                    }
+
+                    isFreeTier = keyData.Data.IsFreeTier;
+                }
+                else
+                {
+                    this._logger.LogWarning("OpenRouter key API response missing 'data' field. Response: {Response}", keyResponseBody);
+                }
+            }
+            else
+            {
+                this._logger.LogWarning(
+                    "OpenRouter key API returned {StatusCode}. Key info unavailable. Response: {Response}",
+                    keyResponse.StatusCode,
+                    keyResponseBody);
+            }
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or System.Text.Json.JsonException)
+        {
+            this._logger.LogWarning(ex, "Exception while calling OpenRouter key API - continuing with credits data only");
+        }
+
+        return new KeyInfoResult(label, spendingLimit, spendingLimitResetTime, isFreeTier);
+    }
+
+    private static DateTime? TryParseLimitResetTime(string? limitReset)
+    {
+        if (string.IsNullOrEmpty(limitReset))
+        {
+            return null;
+        }
+
+        if (DateTime.TryParse(limitReset, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.AdjustToUniversal, out var dt))
+        {
+            var diff = dt - DateTime.UtcNow;
+            if (diff.TotalSeconds > 0)
+            {
+                return dt;
+            }
+        }
+
+        return null;
+    }
+
+    private List<ProviderUsage> BuildUsageCards(ProviderConfig config, OpenRouterCreditsResponse creditsData, string creditsResponseBody, int httpStatus, KeyInfoResult keyInfo)
+    {
+        var total = creditsData.Data!.TotalCredits;
+        var used = creditsData.Data!.TotalUsage;
+        var remainingPercentage = UsageMath.CalculateRemainingPercent(used, total);
+        var remaining = total - used;
+
+        this._logger.LogInformation(
+            "OpenRouter usage calculated - Total: {Total}, Used: {Used}, Remaining: {Remaining}, RemainingPercentage: {RemainingPercentage}%",
+            total,
+            used,
+            remaining,
+            remainingPercentage);
+
+        string mainReset = string.Empty;
+        if (keyInfo.SpendingLimitResetTime.HasValue)
+        {
+            mainReset = $" (Resets: ({keyInfo.SpendingLimitResetTime.Value.ToLocalTime().ToString("MMM dd HH:mm", CultureInfo.InvariantCulture)}))";
+        }
+
+        var results = new List<ProviderUsage>();
+
+        results.Add(new WindowedProviderUsage
+        {
+            ProviderId = config.ProviderId,
+            ProviderName = keyInfo.Label,
+            CardId = "credits",
+            GroupId = config.ProviderId,
+            Name = "Openrouter",
+            UsedPercent = 100.0 - remainingPercentage,
+            RequestsUsed = used,
+            RequestsAvailable = total,
+            IsCurrencyUsage = true,
+            PlanType = this.Definition.PlanType,
+            IsQuotaBased = this.Definition.IsQuotaBased,
+            IsAvailable = true,
+            Description = $"${remaining.ToString("F2", CultureInfo.InvariantCulture)} remaining{mainReset}",
+            NextResetTime = keyInfo.SpendingLimitResetTime,
+            RawJson = creditsResponseBody,
+            HttpStatus = httpStatus,
+        });
+
+        if (keyInfo.SpendingLimit.HasValue)
+        {
+            results.Add(new WindowedProviderUsage
+            {
+                ProviderId = config.ProviderId,
+                ProviderName = keyInfo.Label,
+                CardId = "spending-limit",
+                GroupId = config.ProviderId,
+                Name = "Spending Limit",
+                IsAvailable = true,
+                PlanType = this.Definition.PlanType,
+                IsQuotaBased = this.Definition.IsQuotaBased,
+                Description = keyInfo.SpendingLimit.Value.ToString("F2", CultureInfo.InvariantCulture),
+                NextResetTime = keyInfo.SpendingLimitResetTime,
+                RawJson = creditsResponseBody,
+                HttpStatus = httpStatus,
+            });
+        }
+
+        if (keyInfo.IsFreeTier.HasValue)
+        {
+            results.Add(new WindowedProviderUsage
+            {
+                ProviderId = config.ProviderId,
+                ProviderName = keyInfo.Label,
+                CardId = "free-tier",
+                GroupId = config.ProviderId,
+                Name = "Free Tier",
+                IsAvailable = true,
+                PlanType = this.Definition.PlanType,
+                IsQuotaBased = this.Definition.IsQuotaBased,
+                Description = keyInfo.IsFreeTier.Value ? "Yes" : "No",
+                RawJson = creditsResponseBody,
+                HttpStatus = httpStatus,
+            });
+        }
+
+        return results;
+    }
+
+    private readonly record struct KeyInfoResult(string Label, double? SpendingLimit, DateTime? SpendingLimitResetTime, bool? IsFreeTier);
+
+    private sealed class OpenRouterCreditsResponse
+    {
+        [JsonPropertyName("data")]
+        public CreditsData? Data { get; set; }
+    }
+
+    private sealed class CreditsData
+    {
+        [JsonPropertyName("total_credits")]
+        public double TotalCredits { get; set; }
+
+        [JsonPropertyName("total_usage")]
+        public double TotalUsage { get; set; }
+    }
+
+    private sealed class OpenRouterKeyResponse
+    {
+        [JsonPropertyName("data")]
+        public KeyData? Data { get; set; }
+    }
+
+    private sealed class KeyData
+    {
+        [JsonPropertyName("label")]
+        public string? Label { get; set; }
+
+        [JsonPropertyName("limit")]
+        public double Limit { get; set; }
+
+        [JsonPropertyName("limit_reset")]
+        public string? LimitReset { get; set; }
+
+        [JsonPropertyName("is_free_tier")]
+        public bool IsFreeTier { get; set; }
+    }
+}

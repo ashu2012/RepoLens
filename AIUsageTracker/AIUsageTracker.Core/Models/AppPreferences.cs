@@ -1,0 +1,261 @@
+// <copyright file="AppPreferences.cs" company="AIUsageTracker">
+// Copyright (c) AIUsageTracker. All rights reserved.
+// </copyright>
+
+using System.Text.Json;
+using System.Text.Json.Serialization;
+
+namespace AIUsageTracker.Core.Models;
+
+public class AppPreferences
+{
+    public const int CurrentSchemaVersion = 3;
+
+    public bool ShowAll { get; set; } = false;
+
+    public double WindowWidth { get; set; } = 420;
+
+    public double WindowHeight { get; set; } = 500;
+
+    public double? WindowLeft { get; set; }
+
+    public double? WindowTop { get; set; }
+
+    public bool StayOpen { get; set; } = false;
+
+    public bool AlwaysOnTop { get; set; } = true;
+
+    public bool AggressiveAlwaysOnTop { get; set; } = false;
+
+    public bool ForceWin32Topmost { get; set; } = false;
+
+    public bool CompactMode { get; set; } = true;
+
+    public int ColorThresholdYellow { get; set; } = 60;
+
+    public int ColorThresholdRed { get; set; } = 80;
+
+    public bool ShowUsedPercentages { get; set; } = false;
+
+    public int SchemaVersion { get; set; } = CurrentSchemaVersion;
+
+    public string FontFamily { get; set; } = "Segoe UI";
+
+    public int FontSize { get; set; } = 12;
+
+    public bool FontBold { get; set; } = false;
+
+    public bool FontItalic { get; set; } = false;
+
+    public int AutoRefreshInterval { get; set; } = 300; // In seconds, 0 = Disabled
+
+    // Global cap for concurrent provider API requests across all providers.
+    public int MaxConcurrentProviderRequests { get; set; } = 6;
+
+    public bool IsPrivacyMode { get; set; } = false;
+
+    public bool EnableNotifications { get; set; } = false; // Global notification switch - disabled by default
+
+    public double NotificationThreshold { get; set; } = 90.0; // Notify when usage exceeds this %
+
+    public bool NotifyOnUsageThreshold { get; set; } = true;
+
+    public bool NotifyOnQuotaExceeded { get; set; } = true;
+
+    public bool NotifyOnProviderErrors { get; set; } = false;
+
+    public bool NotifyOnSubscriptionExpired { get; set; } = true;
+
+    public bool EnableQuietHours { get; set; } = false;
+
+    public string QuietHoursStart { get; set; } = "22:00";
+
+    public string QuietHoursEnd { get; set; } = "07:00";
+
+    public bool StartUiWithWindows { get; set; } = false;
+
+    [JsonConverter(typeof(JsonStringEnumConverter<AppTheme>))]
+    public AppTheme Theme { get; set; } = AppTheme.Dark;
+
+    public bool DebugMode { get; set; } = false; // Enable detailed debug logging
+
+    // Collapsible section states
+    public bool IsPlansAndQuotasCollapsed { get; set; } = false;
+
+    public bool IsPayAsYouGoCollapsed { get; set; } = false;
+
+    public bool IsAntigravityCollapsed { get; set; } = false;
+
+    // Provider item visibility — IDs in this list are hidden in the Slim UI.
+    // An empty list means all items are visible (default).
+    public IList<string> HiddenProviderItemIds { get; set; } = new List<string>();
+
+    // Providers the user deliberately removed. ScanForKeysAsync skips these
+    // so externally discovered keys (Roo Code, Kilo Code, env vars) don't reappear.
+    // Un-suppressed automatically when the user re-adds a key via Settings.
+    public IList<string> SuppressedProviderIds { get; set; } = new List<string>();
+
+    // Per-group collapse state for flat card groups (keyed by GroupId).
+    public IDictionary<string, bool> CollapsedGroupIds { get; set; } = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+
+    // Update channel (Stable or Beta).
+    // Uses JsonStringEnumConverter so it accepts BOTH string ("Beta") and numeric (1)
+    // on read, and writes as string. This is critical for upgrade compatibility:
+    // older builds that briefly had the converter wrote strings, while builds that
+    // lost it (merge 8eb7c163) wrote numbers. Both must deserialize correctly.
+    [JsonConverter(typeof(JsonStringEnumConverter<UpdateChannel>))]
+    public UpdateChannel UpdateChannel { get; set; } = UpdateChannel.Stable;
+
+    // Display Options
+    public bool ShowInactiveProviders { get; set; } = false;
+
+    public bool UseRelativeResetTime { get; set; } = false;
+
+    public bool ShowUsagePerHour { get; set; } = false;
+
+    public bool ShowDualQuotaBars { get; set; } = true;
+
+    [JsonConverter(typeof(JsonStringEnumConverter<DualQuotaSingleBarMode>))]
+    public DualQuotaSingleBarMode DualQuotaSingleBarMode { get; set; } = DualQuotaSingleBarMode.Rolling;
+
+    /// <summary>
+    /// Gets or sets a value indicating whether when true, progress-bar colour and notification threshold are adjusted for rolling-window
+    /// pace: a provider at 70% usage with 1 day left of a 7-day window is treated as on-budget,
+    /// not alarming. Disabling this reverts to the raw percentage for all colour and alert logic.
+    /// </summary>
+    public bool EnablePaceAdjustment { get; set; } = true;
+
+    // Card layout slots — configurable in Settings > Cards
+    [JsonConverter(typeof(JsonStringEnumConverter<CardSlotContent>))]
+    public CardSlotContent CardPrimaryBadge { get; set; } = CardSlotContent.PaceBadge;
+
+    [JsonConverter(typeof(JsonStringEnumConverter<CardSlotContent>))]
+    public CardSlotContent CardSecondaryBadge { get; set; } = CardSlotContent.UsageRate;
+
+    [JsonConverter(typeof(JsonStringEnumConverter<CardSlotContent>))]
+    public CardSlotContent CardStatusLine { get; set; } = CardSlotContent.StatusText;
+
+    [JsonConverter(typeof(JsonStringEnumConverter<CardSlotContent>))]
+    public CardSlotContent CardResetInfo { get; set; } = CardSlotContent.ResetAbsolute;
+
+    public bool CardCompactMode { get; set; } = false;
+
+    public bool CardBackgroundBar { get; set; } = true;
+
+    public static AppPreferences Deserialize(string json)
+    {
+        AppPreferences preferences;
+        try
+        {
+            preferences = JsonSerializer.Deserialize<AppPreferences>(json) ?? new AppPreferences();
+        }
+        catch (JsonException)
+        {
+            // A single incompatible property (e.g. enum serialized as string
+            // in one version and numeric in another) must NOT wipe ALL
+            // preferences.  Retry with JsonStringEnumConverter applied
+            // globally so every enum accepts both string and numeric input.
+            var lenientOptions = new JsonSerializerOptions
+            {
+                Converters = { new JsonStringEnumConverter() },
+                NumberHandling = System.Text.Json.Serialization.JsonNumberHandling.AllowReadingFromString,
+            };
+            preferences = JsonSerializer.Deserialize<AppPreferences>(json, lenientOptions) ?? new AppPreferences();
+        }
+
+        preferences.ApplyMigrations(json);
+        preferences.SchemaVersion = CurrentSchemaVersion;
+        return preferences;
+    }
+
+    private static bool TryGetBooleanProperty(JsonElement element, string propertyName, out bool value)
+    {
+        value = false;
+        if (!TryGetProperty(element, propertyName, out var property) || (property.ValueKind != JsonValueKind.True && property.ValueKind != JsonValueKind.False))
+        {
+            return false;
+        }
+
+        value = property.GetBoolean();
+        return true;
+    }
+
+    private static bool TryGetProperty(JsonElement element, string propertyName, out JsonElement property)
+    {
+        var match = element.EnumerateObject()
+            .Where(candidate => string.Equals(candidate.Name, propertyName, StringComparison.OrdinalIgnoreCase))
+            .Cast<JsonProperty?>()
+            .FirstOrDefault();
+
+        if (match.HasValue)
+        {
+            property = match.Value.Value;
+            return true;
+        }
+
+        property = default;
+        return false;
+    }
+
+    private void ApplyMigrations(string json)
+    {
+        using var document = JsonDocument.Parse(json);
+        if (!TryGetProperty(document.RootElement, nameof(this.ShowUsedPercentages), out _) ||
+            !TryGetProperty(document.RootElement, nameof(this.SchemaVersion), out _) ||
+            this.SchemaVersion < CurrentSchemaVersion)
+        {
+            this.ApplyLegacyDisplayModeCompatibility(document.RootElement);
+        }
+    }
+
+    private void ApplyLegacyDisplayModeCompatibility(JsonElement root)
+    {
+        if (TryGetProperty(root, nameof(this.ShowUsedPercentages), out _))
+        {
+            return;
+        }
+
+        if (TryGetLegacyShowUsedPreference(root, out var showUsed))
+        {
+            this.ShowUsedPercentages = showUsed;
+        }
+    }
+
+    private static bool TryGetLegacyShowUsedPreference(JsonElement root, out bool showUsed)
+    {
+        if (TryGetProperty(root, "PercentageDisplayMode", out var displayModeProperty))
+        {
+            if (displayModeProperty.ValueKind == JsonValueKind.String)
+            {
+                var displayMode = displayModeProperty.GetString();
+                if (string.Equals(displayMode, "Used", StringComparison.OrdinalIgnoreCase))
+                {
+                    showUsed = true;
+                    return true;
+                }
+
+                if (string.Equals(displayMode, "Remaining", StringComparison.OrdinalIgnoreCase))
+                {
+                    showUsed = false;
+                    return true;
+                }
+            }
+
+            if (displayModeProperty.ValueKind == JsonValueKind.Number &&
+                displayModeProperty.TryGetInt32(out var displayModeNumber))
+            {
+                showUsed = displayModeNumber == 1;
+                return true;
+            }
+        }
+
+        if (TryGetBooleanProperty(root, "InvertCalculations", out showUsed) ||
+            TryGetBooleanProperty(root, "InvertProgressBar", out showUsed))
+        {
+            return true;
+        }
+
+        showUsed = false;
+        return false;
+    }
+}

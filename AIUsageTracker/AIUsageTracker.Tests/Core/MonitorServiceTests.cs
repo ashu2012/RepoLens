@@ -1,0 +1,933 @@
+// <copyright file="MonitorServiceTests.cs" company="AIUsageTracker">
+// Copyright (c) AIUsageTracker. All rights reserved.
+// </copyright>
+
+using System.Net;
+using System.Net.Http.Json;
+using System.Text.Json;
+using AIUsageTracker.Core.Models;
+using AIUsageTracker.Core.MonitorClient;
+using AIUsageTracker.Infrastructure.MonitorClient;
+using AIUsageTracker.Tests.Infrastructure;
+using Microsoft.Extensions.Logging.Abstractions;
+using Moq;
+using Moq.Protected;
+
+namespace AIUsageTracker.Tests.Core;
+
+public class MonitorServiceTests
+{
+    private readonly Mock<HttpMessageHandler> _mockHandler;
+    private readonly HttpClient _httpClient;
+    private readonly MonitorService _service;
+
+    public MonitorServiceTests()
+    {
+        this._mockHandler = new Mock<HttpMessageHandler>();
+        this._httpClient = new HttpClient(this._mockHandler.Object)
+        {
+            BaseAddress = new Uri("http://localhost:5000"),
+        };
+        this._service = new MonitorService(this._httpClient, NullLogger<MonitorService>.Instance);
+        this._service.AgentUrl = "http://localhost:5000";
+    }
+
+    [Fact]
+    public async Task CheckProviderAsync_Success_ReturnsOkAsync()
+    {
+        // Arrange
+        var responseObj = new { success = true, message = "Connected" };
+        this.SetupMockResponse(HttpStatusCode.OK, responseObj);
+
+        // Act
+        var result = await this._service.CheckProviderAsync("openai");
+
+        // Assert
+        Assert.True(result.Success);
+        Assert.Equal("Connected", result.Message);
+        this.VerifyPath("/api/providers/openai/check");
+    }
+
+    [Fact]
+    public async Task CheckProviderAsync_Error_ReturnsFailureAsync()
+    {
+        // Arrange
+        var responseObj = new { success = false, message = "Invalid Key" };
+        this.SetupMockResponse(HttpStatusCode.Unauthorized, responseObj);
+
+        // Act
+        var result = await this._service.CheckProviderAsync("openai");
+
+        // Assert
+        Assert.False(result.Success);
+        Assert.Equal("Invalid Key", result.Message);
+    }
+
+    [Fact]
+    public async Task ExportDataAsync_Success_ReturnsStreamAsync()
+    {
+        // Arrange
+        var expectedContent = "Time,Provider\n2026-02-19,openai";
+        this._mockHandler.Protected()
+            .Setup<Task<HttpResponseMessage>>(
+                "SendAsync",
+                ItExpr.IsAny<HttpRequestMessage>(),
+                ItExpr.IsAny<CancellationToken>())
+            .ReturnsAsync(new HttpResponseMessage
+            {
+                StatusCode = HttpStatusCode.OK,
+                Content = new StringContent(expectedContent),
+            });
+
+        // Act
+        var stream = await this._service.ExportDataAsync("csv", 7);
+
+        // Assert
+        Assert.NotNull(stream);
+        using var reader = new StreamReader(stream);
+        var content = await reader.ReadToEndAsync();
+        Assert.Equal(expectedContent, content);
+        this.VerifyPath("/api/export", "format=csv", "days=7");
+    }
+
+    [Fact]
+    public async Task GetUsageAsync_RecordsUsageTelemetryAsync()
+    {
+        // Arrange
+        var baseline = this._service.GetTelemetrySnapshot();
+        var usage = new List<ProviderUsage>
+        {
+            new QuotaProviderUsage { ProviderId = "openai", ProviderName = "OpenAI", IsAvailable = true },
+        };
+        this.SetupMockResponse(HttpStatusCode.OK, usage);
+
+        // Act
+        var result = await this._service.GetUsageAsync();
+        var telemetry = this._service.GetTelemetrySnapshot();
+
+        // Assert
+        Assert.Single(result);
+        Assert.True(telemetry.UsageRequestCount >= baseline.UsageRequestCount + 1);
+        Assert.True(telemetry.UsageErrorCount >= baseline.UsageErrorCount);
+    }
+
+    [Fact]
+    public async Task GetGroupedUsageAsync_WhenSnapshotIsUnchanged_UsesCachedResponseOn304Async()
+    {
+        var requestHeaders = new List<string?>();
+        var snapshot = new AgentGroupedUsageSnapshot
+        {
+            ContractVersion = MonitorService.ExpectedApiContractVersion,
+            Providers = new[]
+            {
+                new AgentGroupedProviderUsage
+                {
+                    ProviderId = "openai",
+                    ProviderName = "OpenAI",
+                    IsAvailable = true,
+                },
+            },
+        };
+
+        var responseCount = 0;
+        this._mockHandler.Protected()
+            .Setup<Task<HttpResponseMessage>>(
+                "SendAsync",
+                ItExpr.IsAny<HttpRequestMessage>(),
+                ItExpr.IsAny<CancellationToken>())
+            .Returns<HttpRequestMessage, CancellationToken>((request, _) =>
+            {
+                requestHeaders.Add(request.Headers.IfNoneMatch.FirstOrDefault()?.ToString());
+                responseCount++;
+
+                if (responseCount == 1)
+                {
+                    var response = new HttpResponseMessage(HttpStatusCode.OK)
+                    {
+                        Content = JsonContent.Create(snapshot, options: new JsonSerializerOptions
+                        {
+                            PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
+                        }),
+                    };
+                    response.Headers.ETag = new System.Net.Http.Headers.EntityTagHeaderValue("\"grouped-usage-v1\"");
+                    return Task.FromResult(response);
+                }
+
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotModified));
+            });
+
+        var first = await this._service.GetGroupedUsageAsync();
+        var second = await this._service.GetGroupedUsageAsync();
+
+        Assert.NotNull(first);
+        Assert.NotNull(second);
+        Assert.Equal("openai", Assert.Single(second!.Providers).ProviderId);
+        Assert.Equal(2, requestHeaders.Count);
+        Assert.Null(requestHeaders[0]);
+        Assert.Equal("\"grouped-usage-v1\"", requestHeaders[1]);
+        this.VerifyPath("/api/usage/grouped");
+    }
+
+    [Fact]
+    public async Task GetUsageAsync_RevalidatesEndpointBeforeRequestAsync()
+    {
+        var tempDirectory = this.CreateTempDirectory();
+
+        try
+        {
+            var infoPath = await this.CreateMonitorInfoAsync(tempDirectory, new MonitorInfo
+            {
+                Port = 5333,
+                ProcessId = 4242,
+            });
+
+            var launcher = new MonitorLauncher(
+                monitorInfoCandidatePathsOverride: () => new[] { infoPath },
+                healthCheckOverride: port => Task.FromResult(port == 5333),
+                processRunningOverride: processId => Task.FromResult(processId == 4242));
+
+            var service = new MonitorService(this._httpClient, NullLogger<MonitorService>.Instance, launcher);
+
+            var requestedUrls = new List<string>();
+            var usage = new List<ProviderUsage>
+            {
+                new QuotaProviderUsage { ProviderId = "openai", ProviderName = "OpenAI", IsAvailable = true },
+            };
+
+            service.AgentUrl = "http://localhost:5000";
+
+            this._mockHandler.Protected()
+                .Setup<Task<HttpResponseMessage>>(
+                    "SendAsync",
+                    ItExpr.IsAny<HttpRequestMessage>(),
+                    ItExpr.IsAny<CancellationToken>())
+                .Returns<HttpRequestMessage, CancellationToken>((request, _) =>
+                {
+                    requestedUrls.Add(request.RequestUri!.ToString());
+                    return Task.FromResult(new HttpResponseMessage
+                    {
+                        StatusCode = HttpStatusCode.OK,
+                        Content = JsonContent.Create(usage, options: new JsonSerializerOptions
+                        {
+                            PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
+                        }),
+                    });
+                });
+
+            var result = await service.GetUsageAsync();
+
+            Assert.Single(result);
+            Assert.Equal("http://localhost:5333", service.AgentUrl);
+            Assert.Single(requestedUrls);
+            Assert.Equal("http://localhost:5333/api/usage", requestedUrls[0]);
+        }
+        finally
+        {
+            TestTempPaths.CleanupPath(tempDirectory);
+        }
+    }
+
+    [Fact]
+    public async Task GetUsageAsync_RequestTimesOut_RefreshesEndpointAndRetriesAsync()
+    {
+        var tempDirectory = this.CreateTempDirectory();
+
+        try
+        {
+            var infoPath = await this.CreateMonitorInfoAsync(tempDirectory, new MonitorInfo
+            {
+                Port = 5333,
+                ProcessId = 4242,
+            });
+
+            var launcher = new MonitorLauncher(
+                monitorInfoCandidatePathsOverride: () => new[] { infoPath },
+                healthCheckOverride: port => Task.FromResult(port == 5333),
+                processRunningOverride: processId => Task.FromResult(processId == 4242));
+
+            var service = new MonitorService(this._httpClient, NullLogger<MonitorService>.Instance, launcher);
+
+            var requestedUrls = new List<string>();
+            var usage = new List<ProviderUsage>
+            {
+                new QuotaProviderUsage { ProviderId = "openai", ProviderName = "OpenAI", IsAvailable = true },
+            };
+
+            service.AgentUrl = "http://localhost:5000";
+
+            this._mockHandler.Protected()
+                .Setup<Task<HttpResponseMessage>>(
+                    "SendAsync",
+                    ItExpr.IsAny<HttpRequestMessage>(),
+                    ItExpr.IsAny<CancellationToken>())
+                .Returns<HttpRequestMessage, CancellationToken>((request, _) =>
+                {
+                    requestedUrls.Add(request.RequestUri!.ToString());
+                    return requestedUrls.Count == 1
+                        ? Task.FromException<HttpResponseMessage>(new TaskCanceledException("timeout"))
+                        : Task.FromResult(new HttpResponseMessage
+                        {
+                            StatusCode = HttpStatusCode.OK,
+                            Content = JsonContent.Create(usage, options: new JsonSerializerOptions
+                            {
+                                PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
+                            }),
+                        });
+                });
+
+            var result = await service.GetUsageAsync();
+
+            Assert.Single(result);
+            Assert.Equal("http://localhost:5333", service.AgentUrl);
+            Assert.Equal(2, requestedUrls.Count);
+            Assert.All(requestedUrls, requestedUrl => Assert.Equal("http://localhost:5333/api/usage", requestedUrl));
+        }
+        finally
+        {
+            TestTempPaths.CleanupPath(tempDirectory);
+        }
+    }
+
+    [Fact]
+    public async Task GetUsageAsync_RequestTimesOutTwice_ReturnsEmptyListAsync()
+    {
+        var tempDirectory = this.CreateTempDirectory();
+
+        try
+        {
+            var infoPath = await this.CreateMonitorInfoAsync(tempDirectory, new MonitorInfo
+            {
+                Port = 5333,
+                ProcessId = 4242,
+            });
+
+            var launcher = new MonitorLauncher(
+                monitorInfoCandidatePathsOverride: () => new[] { infoPath },
+                healthCheckOverride: port => Task.FromResult(port == 5333),
+                processRunningOverride: processId => Task.FromResult(processId == 4242));
+
+            var service = new MonitorService(this._httpClient, NullLogger<MonitorService>.Instance, launcher);
+            service.AgentUrl = "http://localhost:5000";
+
+            this._mockHandler.Protected()
+                .Setup<Task<HttpResponseMessage>>(
+                    "SendAsync",
+                    ItExpr.IsAny<HttpRequestMessage>(),
+                    ItExpr.IsAny<CancellationToken>())
+                .ThrowsAsync(new TaskCanceledException("timeout"));
+
+            var result = await service.GetUsageAsync();
+
+            Assert.Empty(result);
+            Assert.Equal("http://localhost:5333", service.AgentUrl);
+        }
+        finally
+        {
+            TestTempPaths.CleanupPath(tempDirectory);
+        }
+    }
+
+    [Fact]
+    public async Task TriggerRefreshAsync_RevalidatesEndpointBeforeRefreshRequestAsync()
+    {
+        var tempDirectory = this.CreateTempDirectory();
+
+        try
+        {
+            var infoPath = await this.CreateMonitorInfoAsync(tempDirectory, new MonitorInfo
+            {
+                Port = 5444,
+                ProcessId = 5151,
+            });
+
+            var launcher = new MonitorLauncher(
+                monitorInfoCandidatePathsOverride: () => new[] { infoPath },
+                healthCheckOverride: port => Task.FromResult(port == 5444),
+                processRunningOverride: processId => Task.FromResult(processId == 5151));
+
+            var service = new MonitorService(this._httpClient, NullLogger<MonitorService>.Instance, launcher);
+            service.AgentUrl = "http://localhost:5000";
+            this.SetupMockResponse(HttpStatusCode.OK, new { success = true });
+
+            var success = await service.TriggerRefreshAsync();
+
+            Assert.True(success);
+            Assert.Equal("http://localhost:5444", service.AgentUrl);
+            this._mockHandler.Protected().Verify(
+                "SendAsync",
+                Times.AtLeastOnce(),
+                ItExpr.Is<HttpRequestMessage>(req =>
+                    req.RequestUri != null &&
+                    req.RequestUri.ToString() == "http://localhost:5444/api/refresh" &&
+                    req.Method == HttpMethod.Post),
+                ItExpr.IsAny<CancellationToken>());
+        }
+        finally
+        {
+            TestTempPaths.CleanupPath(tempDirectory);
+        }
+    }
+
+    [Fact]
+    public async Task TriggerRefreshAsync_RequestFails_RecordsRefreshErrorTelemetryAsync()
+    {
+        // Arrange
+        var baseline = this._service.GetTelemetrySnapshot();
+        this._mockHandler.Protected()
+            .Setup<Task<HttpResponseMessage>>(
+                "SendAsync",
+                ItExpr.IsAny<HttpRequestMessage>(),
+                ItExpr.IsAny<CancellationToken>())
+            .ThrowsAsync(new HttpRequestException("network failure"));
+
+        // Act
+        var success = await this._service.TriggerRefreshAsync();
+        var telemetry = this._service.GetTelemetrySnapshot();
+
+        // Assert
+        Assert.False(success);
+        Assert.True(telemetry.RefreshRequestCount >= baseline.RefreshRequestCount + 1);
+        Assert.True(telemetry.RefreshErrorCount >= baseline.RefreshErrorCount + 1);
+    }
+
+    [Fact]
+    public async Task CheckHealthAsync_RevalidatesEndpointBeforeHealthRequestAsync()
+    {
+        var tempDirectory = this.CreateTempDirectory();
+
+        try
+        {
+            var infoPath = await this.CreateMonitorInfoAsync(tempDirectory, new MonitorInfo
+            {
+                Port = 5666,
+                ProcessId = 6767,
+            });
+
+            var launcher = new MonitorLauncher(
+                monitorInfoCandidatePathsOverride: () => new[] { infoPath },
+                healthCheckOverride: port => Task.FromResult(port == 5666),
+                processRunningOverride: processId => Task.FromResult(processId == 6767));
+
+            var service = new MonitorService(this._httpClient, NullLogger<MonitorService>.Instance, launcher);
+            service.AgentUrl = "http://localhost:5000";
+            this.SetupMockResponse(HttpStatusCode.OK, new
+            {
+                status = "healthy",
+                apiContractVersion = MonitorService.ExpectedApiContractVersion,
+            });
+
+            var isHealthy = await service.CheckHealthAsync();
+
+            Assert.True(isHealthy);
+            Assert.Equal("http://localhost:5666", service.AgentUrl);
+            this._mockHandler.Protected().Verify(
+                "SendAsync",
+                Times.AtLeastOnce(),
+                ItExpr.Is<HttpRequestMessage>(req =>
+                    req.RequestUri != null &&
+                    req.RequestUri.ToString() == "http://localhost:5666/api/health" &&
+                    req.Method == HttpMethod.Get),
+                ItExpr.IsAny<CancellationToken>());
+        }
+        finally
+        {
+            TestTempPaths.CleanupPath(tempDirectory);
+        }
+    }
+
+    [Fact]
+    public async Task CheckApiContractAsync_Compatible_ReturnsCompatibleResultAsync()
+    {
+        // Arrange
+        var responseObj = new
+        {
+            status = "healthy",
+            apiContractVersion = MonitorService.ExpectedApiContractVersion,
+            agentVersion = "2.1.3",
+        };
+        this.SetupMockResponse(HttpStatusCode.OK, responseObj);
+
+        // Act
+        var result = await this._service.CheckApiContractAsync();
+
+        // Assert
+        Assert.True(result.IsReachable);
+        Assert.True(result.IsCompatible);
+        Assert.Equal(MonitorService.ExpectedApiContractVersion, result.AgentContractVersion);
+        this.VerifyPath("/api/health");
+    }
+
+    [Fact]
+    public async Task CheckApiContractAsync_Compatible_UsesCanonicalContractVersionFieldAsync()
+    {
+        // Arrange
+        var responseObj = new
+        {
+            status = "healthy",
+            contractVersion = MonitorService.ExpectedApiContractVersion,
+            agentVersion = "2.1.3",
+        };
+        this.SetupMockResponse(HttpStatusCode.OK, responseObj);
+
+        // Act
+        var result = await this._service.CheckApiContractAsync();
+
+        // Assert
+        Assert.True(result.IsReachable);
+        Assert.True(result.IsCompatible);
+        Assert.Equal(MonitorService.ExpectedApiContractVersion, result.AgentContractVersion);
+        this.VerifyPath("/api/health");
+    }
+
+    [Fact]
+    public async Task CheckApiContractAsync_Compatible_AcceptsNewerMinorVersionAsync()
+    {
+        // Arrange
+        var responseObj = new
+        {
+            status = "healthy",
+            contractVersion = "1.3",
+            agentVersion = "2.1.3",
+        };
+        this.SetupMockResponse(HttpStatusCode.OK, responseObj);
+
+        // Act
+        var result = await this._service.CheckApiContractAsync();
+
+        // Assert
+        Assert.True(result.IsReachable);
+        Assert.True(result.IsCompatible);
+        Assert.Equal("1.3", result.AgentContractVersion);
+        this.VerifyPath("/api/health");
+    }
+
+    [Fact]
+    public async Task CheckApiContractAsync_Mismatch_WhenMonitorRequiresNewerClientContractAsync()
+    {
+        // Arrange
+        var responseObj = new
+        {
+            status = "healthy",
+            contractVersion = "1.3",
+            minClientContractVersion = "2.0",
+            agentVersion = "2.1.3",
+        };
+        this.SetupMockResponse(HttpStatusCode.OK, responseObj);
+
+        // Act
+        var result = await this._service.CheckApiContractAsync();
+
+        // Assert
+        Assert.True(result.IsReachable);
+        Assert.False(result.IsCompatible);
+        Assert.Equal("1.3", result.AgentContractVersion);
+        Assert.Equal("2.0", result.MinClientContractVersion);
+        Assert.Contains("requires client contract", result.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task CheckApiContractAsync_Mismatch_ReturnsWarningResultAsync()
+    {
+        // Arrange
+        var responseObj = new
+        {
+            status = "healthy",
+            contractVersion = "2.0",
+            agentVersion = "2.1.3",
+        };
+        this.SetupMockResponse(HttpStatusCode.OK, responseObj);
+
+        // Act
+        var result = await this._service.CheckApiContractAsync();
+
+        // Assert
+        Assert.True(result.IsReachable);
+        Assert.False(result.IsCompatible);
+        Assert.Equal("2.0", result.AgentContractVersion);
+        Assert.Contains("major mismatch", result.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task CheckApiContractAsync_RequestFails_ReturnsUnreachableResultAsync()
+    {
+        // Arrange
+        this._mockHandler.Protected()
+            .Setup<Task<HttpResponseMessage>>(
+                "SendAsync",
+                ItExpr.IsAny<HttpRequestMessage>(),
+                ItExpr.IsAny<CancellationToken>())
+            .ThrowsAsync(new HttpRequestException("connection refused"));
+
+        // Act
+        var result = await this._service.CheckApiContractAsync();
+
+        // Assert
+        Assert.False(result.IsReachable);
+        Assert.False(result.IsCompatible);
+        Assert.True(result.Message.Contains("failed", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void EvaluateApiContractCompatibility_AllowsMatchingMajor()
+    {
+        var result = MonitorService.EvaluateApiContractCompatibility("1.7", minClientContractVersion: null, "2.1.3");
+
+        Assert.True(result.IsReachable);
+        Assert.True(result.IsCompatible);
+        Assert.Equal("1.7", result.AgentContractVersion);
+    }
+
+    [Fact]
+    public void EvaluateApiContractCompatibility_AllowsVersionPrefix()
+    {
+        var result = MonitorService.EvaluateApiContractCompatibility("v1.2", "v1", "2.1.3");
+
+        Assert.True(result.IsReachable);
+        Assert.True(result.IsCompatible);
+        Assert.Equal("v1.2", result.AgentContractVersion);
+        Assert.Equal("v1", result.MinClientContractVersion);
+    }
+
+    [Fact]
+    public void EvaluateApiContractCompatibility_RejectsMajorMismatch()
+    {
+        var result = MonitorService.EvaluateApiContractCompatibility("2.0", minClientContractVersion: null, "2.1.3");
+
+        Assert.True(result.IsReachable);
+        Assert.False(result.IsCompatible);
+        Assert.Contains("major mismatch", result.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void EvaluateApiContractCompatibility_RejectsWhenMinClientIsHigher()
+    {
+        var result = MonitorService.EvaluateApiContractCompatibility("1.4", "1.1", "2.1.3");
+
+        Assert.True(result.IsReachable);
+        Assert.False(result.IsCompatible);
+        Assert.Contains("requires client contract", result.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task GetHealthDetailsAsync_Success_ReturnsPayloadAsync()
+    {
+        // Arrange
+        var responseObj = new
+        {
+            status = "healthy",
+            apiContractVersion = MonitorService.ExpectedApiContractVersion,
+        };
+        this.SetupMockResponse(HttpStatusCode.OK, responseObj);
+
+        // Act
+        var result = await this._service.GetHealthDetailsAsync();
+
+        // Assert
+        Assert.Contains("healthy", result, StringComparison.OrdinalIgnoreCase);
+        this.VerifyPath("/api/health");
+    }
+
+    [Fact]
+    public async Task GetHealthSnapshotAsync_Success_ParsesRefreshSummaryAsync()
+    {
+        var responseObj = new
+        {
+            status = "healthy",
+            serviceHealth = "degraded",
+            timestamp = new DateTime(2026, 3, 10, 9, 0, 0, DateTimeKind.Utc),
+            port = 5000,
+            processId = 4242,
+            contractVersion = MonitorService.ExpectedApiContractVersion,
+            minClientContractVersion = MonitorService.ExpectedApiContractVersion,
+            agentVersion = "2.2.28",
+            refreshHealth = new
+            {
+                status = "degraded",
+                lastRefreshAttemptUtc = new DateTime(2026, 3, 10, 8, 59, 0, DateTimeKind.Utc),
+                lastRefreshCompletedUtc = new DateTime(2026, 3, 10, 8, 59, 1, DateTimeKind.Utc),
+                lastSuccessfulRefreshUtc = new DateTime(2026, 3, 10, 8, 55, 0, DateTimeKind.Utc),
+                lastError = "ProviderManager not ready",
+                providersInBackoff = 2,
+                failingProviders = new[] { "openai", "anthropic" },
+            },
+        };
+        this.SetupMockResponse(HttpStatusCode.OK, responseObj);
+
+        var result = await this._service.GetHealthSnapshotAsync();
+
+        Assert.NotNull(result);
+        Assert.Equal("healthy", result!.Status);
+        Assert.Equal("degraded", result.ServiceHealth);
+        Assert.Equal(5000, result.Port);
+        Assert.Equal(4242, result.ProcessId);
+        Assert.Equal("2.2.28", result.AgentVersion);
+        Assert.Equal(MonitorService.ExpectedApiContractVersion, result.ContractVersion);
+        Assert.Equal(MonitorService.ExpectedApiContractVersion, result.MinClientContractVersion);
+#pragma warning disable CS0618
+        Assert.Null(result.ApiContractVersion);
+        Assert.Null(result.MinClientApiContractVersion);
+#pragma warning restore CS0618
+        Assert.Equal(MonitorService.ExpectedApiContractVersion, result.EffectiveContractVersion);
+        Assert.Equal(MonitorService.ExpectedApiContractVersion, result.EffectiveMinClientContractVersion);
+        Assert.Equal("degraded", result.RefreshHealth.Status);
+        Assert.Equal("ProviderManager not ready", result.RefreshHealth.LastError);
+        Assert.Equal(2, result.RefreshHealth.ProvidersInBackoff);
+        Assert.Equal(new[] { "openai", "anthropic" }, result.RefreshHealth.FailingProviders);
+        this.VerifyPath("/api/health");
+    }
+
+    [Fact]
+    public async Task GetHealthSnapshotAsync_RequestFails_ReturnsNullAsync()
+    {
+        this._mockHandler.Protected()
+            .Setup<Task<HttpResponseMessage>>(
+                "SendAsync",
+                ItExpr.IsAny<HttpRequestMessage>(),
+                ItExpr.IsAny<CancellationToken>())
+            .ThrowsAsync(new HttpRequestException("network failure"));
+
+        var result = await this._service.GetHealthSnapshotAsync();
+
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public async Task GetDiagnosticsDetailsAsync_RequestFails_ReturnsErrorMessageAsync()
+    {
+        // Arrange
+        this._mockHandler.Protected()
+            .Setup<Task<HttpResponseMessage>>(
+                "SendAsync",
+                ItExpr.IsAny<HttpRequestMessage>(),
+                ItExpr.IsAny<CancellationToken>())
+            .ThrowsAsync(new HttpRequestException("network failure"));
+
+        // Act
+        var result = await this._service.GetDiagnosticsDetailsAsync();
+
+        // Assert
+        Assert.Contains("Request failed", result, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task SendTestNotificationDetailedAsync_Success_ReturnsSuccessMessageAsync()
+    {
+        // Arrange
+        this.SetupMockResponse(HttpStatusCode.OK, new { success = true, message = "Test sent" });
+
+        // Act
+        var result = await this._service.SendTestNotificationDetailedAsync();
+
+        // Assert
+        Assert.True(result.Success);
+        Assert.Contains("Test sent", result.Message, StringComparison.OrdinalIgnoreCase);
+        this.VerifyPath("/api/notifications/test");
+    }
+
+    [Fact]
+    public async Task SendTestNotificationDetailedAsync_NotFound_ReturnsRestartHintAsync()
+    {
+        // Arrange
+        this.SetupMockResponse(HttpStatusCode.NotFound, new { message = "not found" });
+
+        // Act
+        var result = await this._service.SendTestNotificationDetailedAsync();
+
+        // Assert
+        Assert.False(result.Success);
+        Assert.Contains("Restart Monitor", result.Message, StringComparison.OrdinalIgnoreCase);
+        this.VerifyPath("/api/notifications/test");
+    }
+
+    [Fact]
+    public async Task SendTestNotificationDetailedAsync_RequestFails_ReturnsUnreachableHintAsync()
+    {
+        // Arrange
+        this._mockHandler.Protected()
+            .Setup<Task<HttpResponseMessage>>(
+                "SendAsync",
+                ItExpr.IsAny<HttpRequestMessage>(),
+                ItExpr.IsAny<CancellationToken>())
+            .ThrowsAsync(new HttpRequestException("connection refused"));
+
+        // Act
+        var result = await this._service.SendTestNotificationDetailedAsync();
+
+        // Assert
+        Assert.False(result.Success);
+        Assert.Contains("Ensure it is running", result.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task GetUsageByProviderAsync_RequestFails_ReturnsNullAsync()
+    {
+        // Arrange
+        this._mockHandler.Protected()
+            .Setup<Task<HttpResponseMessage>>(
+                "SendAsync",
+                ItExpr.IsAny<HttpRequestMessage>(),
+                ItExpr.IsAny<CancellationToken>())
+            .ThrowsAsync(new HttpRequestException("connection refused"));
+
+        // Act
+        var result = await this._service.GetUsageByProviderAsync("openai");
+
+        // Assert
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public async Task ScanForKeysAsync_Success_ReturnsDiscoveredConfigsAsync()
+    {
+        // Arrange
+        this.SetupMockResponse(
+            HttpStatusCode.OK,
+            new
+            {
+                discovered = 2,
+                configs = new[]
+                {
+                    new { providerId = "openai", providerName = "OpenAI" },
+                    new { providerId = "anthropic", providerName = "Anthropic" },
+                },
+            });
+
+        // Act
+        var result = await this._service.ScanForKeysAsync();
+
+        // Assert
+        Assert.Equal(2, result.Count);
+        Assert.Equal(2, result.Configs.Count);
+        this.VerifyPath("/api/scan-keys");
+    }
+
+    [Fact]
+    public async Task ScanForKeysAsync_InvalidJson_ReturnsEmptyResultAsync()
+    {
+        // Arrange
+        this._mockHandler.Protected()
+            .Setup<Task<HttpResponseMessage>>(
+                "SendAsync",
+                ItExpr.IsAny<HttpRequestMessage>(),
+                ItExpr.IsAny<CancellationToken>())
+            .ReturnsAsync(new HttpResponseMessage
+            {
+                StatusCode = HttpStatusCode.OK,
+                Content = new StringContent("{not-valid-json}", System.Text.Encoding.UTF8, "application/json"),
+            });
+
+        // Act
+        var result = await this._service.ScanForKeysAsync();
+
+        // Assert
+        Assert.Equal(0, result.Count);
+        Assert.Empty(result.Configs);
+        this.VerifyPath("/api/scan-keys");
+    }
+
+    [Fact]
+    public async Task GetGroupedUsageAsync_Success_ReturnsGroupedSnapshotAsync()
+    {
+        var expectedEffectiveReset = new DateTime(2026, 3, 12, 13, 30, 0, DateTimeKind.Utc);
+        this.SetupMockResponse(
+            HttpStatusCode.OK,
+            new
+            {
+                contractVersion = MonitorService.ExpectedApiContractVersion,
+                generatedAtUtc = new DateTime(2026, 3, 12, 8, 0, 0, DateTimeKind.Utc),
+                providers = new[]
+                {
+                    new
+                    {
+                        providerId = "gemini-cli",
+                        providerName = "Google Gemini CLI",
+                        isAvailable = true,
+                        modelCount = 1,
+                        models = new[]
+                        {
+                            new
+                            {
+                                modelId = "gemini-2.5-flash-lite",
+                                modelName = "Gemini 2.5 Flash Lite",
+                                remainingPercentage = 97.1,
+                                usedPercentage = 2.9,
+                                effectiveRemainingPercentage = 96.2,
+                                effectiveUsedPercentage = 3.8,
+                                effectiveDescription = "96.2% remaining",
+                                effectiveNextResetTime = expectedEffectiveReset,
+                                quotaBuckets = new[]
+                                {
+                                    new
+                                    {
+                                        bucketId = "effective",
+                                        bucketName = "Effective Quota",
+                                        remainingPercentage = 97.1,
+                                        usedPercentage = 2.9,
+                                        description = "97.1% remaining",
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
+            });
+
+        var result = await this._service.GetGroupedUsageAsync();
+
+        Assert.NotNull(result);
+        Assert.Equal(MonitorService.ExpectedApiContractVersion, result!.ContractVersion);
+        var provider = Assert.Single(result.Providers);
+        Assert.Equal("gemini-cli", provider.ProviderId);
+        var model = Assert.Single(provider.Models);
+        Assert.Equal("gemini-2.5-flash-lite", model.ModelId);
+        Assert.Equal(96.2, model.EffectiveRemainingPercentage);
+        Assert.Equal(3.8, model.EffectiveUsedPercentage);
+        Assert.Equal("96.2% remaining", model.EffectiveDescription);
+        Assert.Equal(expectedEffectiveReset, model.EffectiveNextResetTime);
+        var quotaBucket = Assert.Single(model.QuotaBuckets);
+        Assert.Equal("effective", quotaBucket.BucketId);
+        this.VerifyPath("/api/usage/grouped");
+    }
+
+    private void SetupMockResponse(HttpStatusCode status, object body)
+    {
+        this._mockHandler.Protected()
+            .Setup<Task<HttpResponseMessage>>(
+                "SendAsync",
+                ItExpr.IsAny<HttpRequestMessage>(),
+                ItExpr.IsAny<CancellationToken>())
+            .ReturnsAsync(new HttpResponseMessage
+            {
+                StatusCode = status,
+                Content = JsonContent.Create(body, options: new JsonSerializerOptions
+                {
+                    PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
+                }),
+            });
+    }
+
+    private void VerifyPath(string path, params string[] queryParts)
+    {
+        this._mockHandler.Protected().Verify(
+            "SendAsync",
+            Times.AtLeastOnce(),
+            ItExpr.Is<HttpRequestMessage>(req =>
+                req.RequestUri != null &&
+                req.RequestUri.AbsolutePath == path &&
+                queryParts.All(qp => req.RequestUri.Query.Contains(qp, StringComparison.Ordinal))),
+            ItExpr.IsAny<CancellationToken>());
+    }
+
+    private string CreateTempDirectory()
+    {
+        return TestTempPaths.CreateDirectory("monitor-service-tests");
+    }
+
+    private async Task<string> CreateMonitorInfoAsync(string directory, MonitorInfo info)
+    {
+        var path = Path.Combine(directory, "monitor.json");
+        var json = JsonSerializer.Serialize(info);
+        await File.WriteAllTextAsync(path, json).ConfigureAwait(false);
+        return path;
+    }
+}

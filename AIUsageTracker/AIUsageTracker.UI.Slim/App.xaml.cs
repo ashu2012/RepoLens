@@ -1,0 +1,236 @@
+// <copyright file="App.xaml.cs" company="AIUsageTracker">
+// Copyright (c) AIUsageTracker. All rights reserved.
+// </copyright>
+
+using System.Net.Http;
+using System.Windows;
+using AIUsageTracker.Core.Interfaces;
+using AIUsageTracker.Core.Models;
+using AIUsageTracker.Core.Providers;
+using AIUsageTracker.Infrastructure.Extensions;
+using AIUsageTracker.Infrastructure.MonitorClient;
+using AIUsageTracker.Infrastructure.Services;
+using AIUsageTracker.UI.Slim.Services;
+using AIUsageTracker.UI.Slim.ViewModels;
+using Hardcodet.Wpf.TaskbarNotification;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+using Microsoft.Win32;
+
+namespace AIUsageTracker.UI.Slim;
+
+public partial class App : Application
+{
+    private static readonly IHost _host = Microsoft.Extensions.Hosting.Host.CreateDefaultBuilder()
+        .ConfigureServices((context, services) =>
+        {
+            ConfigureServices(services);
+        })
+        .Build();
+
+    private readonly Dictionary<string, TaskbarIcon> _providerTrayIcons = new(StringComparer.Ordinal);
+    private TaskbarIcon? _trayIcon;
+    private MainWindow? _mainWindow;
+    private SingleInstanceLockService? _singleInstanceLockService;
+
+    /// <summary>
+    /// Gets the background task that ensures the monitor is running.
+    /// Fired immediately on startup so it runs in parallel with WPF initialization.
+    /// </summary>
+    public static Task<bool> MonitorWarmupTask { get; private set; } = Task.FromResult(false);
+
+    public App()
+    {
+    }
+
+    public static event EventHandler<PrivacyChangedEventArgs>? PrivacyChanged;
+
+    public static IHost Host => _host;
+
+    public static IMonitorService MonitorService => Host.Services.GetRequiredService<IMonitorService>();
+
+    public static AppPreferences Preferences { get; set; } = new();
+
+    public static bool IsPrivacyMode { get; set; }
+
+    public Func<bool> IsMainWindowVisible { get; set; } = () => Current.MainWindow?.IsVisible ?? false;
+
+    public Func<Window> InfoDialogFactory { get; set; } = () => Host.Services.GetRequiredService<InfoDialog>();
+
+    public Action<Window> ShowInfoDialogAction { get; set; } = dialog => dialog.ShowDialog();
+
+    private static void StartMonitorWarmup()
+    {
+        MonitorWarmupTask = Task.Run(async () =>
+        {
+            try
+            {
+                var lifecycle = Host.Services.GetRequiredService<MonitorLifecycleService>();
+                return await lifecycle.EnsureAgentRunningAsync().ConfigureAwait(false); // ui-thread-guardrail-allow: Task.Run thread pool
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                Host.Services.GetRequiredService<ILogger<App>>()
+                    .LogWarning(ex, "Background monitor warmup failed");
+                return false;
+            }
+        });
+    }
+
+    public static void SetPrivacyMode(bool enabled)
+    {
+        IsPrivacyMode = enabled;
+        Preferences.IsPrivacyMode = enabled;
+        PrivacyChanged?.Invoke(null, new PrivacyChangedEventArgs(enabled));
+    }
+
+    public static ILogger<T> CreateLogger<T>() => Host.Services.GetRequiredService<ILogger<T>>();
+
+    // Testing Support
+    public void SetMainWindowForTesting(MainWindow window) => this._mainWindow = window;
+
+    public void OpenInfoDialog() => this.ShowInfoDialogAction(this.InfoDialogFactory());
+
+#pragma warning disable VSTHRD100 // WPF Application lifecycle overrides require async void signatures
+    protected override async void OnStartup(StartupEventArgs e)
+    {
+        ArgumentNullException.ThrowIfNull(e);
+
+        this._singleInstanceLockService = Host.Services.GetRequiredService<SingleInstanceLockService>();
+        if (!this._singleInstanceLockService.TryAcquire())
+        {
+            base.OnStartup(e);
+            this.Shutdown(0);
+            return;
+        }
+
+        // Load preferences BEFORE Host.StartAsync() so DI singletons
+        // (e.g. GitHubUpdateChecker) capture the correct UpdateChannel.
+        var preferencesStore = Host.Services.GetRequiredService<UiPreferencesStore>();
+        try
+        {
+            Preferences = await preferencesStore.LoadAsync().ConfigureAwait(true);
+            if (Preferences.SchemaVersion < AppPreferences.CurrentSchemaVersion)
+            {
+                _ = preferencesStore.SaveAsync(Preferences);
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            var logger = Host.Services.GetRequiredService<ILogger<App>>();
+            logger.LogError(ex, "Failed to load preferences from disk");
+            MessageBox.Show(
+                $"Could not load preferences:\n{ex.Message}\n\nThe application will start with default settings.",
+                "Preferences Error",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+            Preferences = new AppPreferences();
+        }
+
+        await Host.StartAsync().ConfigureAwait(true);
+        base.OnStartup(e);
+
+        if (e.Args.Contains("--test", StringComparer.OrdinalIgnoreCase) &&
+            e.Args.Contains("--screenshot", StringComparer.OrdinalIgnoreCase))
+        {
+            this.ShutdownMode = ShutdownMode.OnExplicitShutdown;
+            _ = this.RunHeadlessScreenshotCaptureAsync(e.Args);
+            return;
+        }
+
+        // Fire monitor warmup IMMEDIATELY — runs in parallel with
+        // theme apply, tray icon init, and the expensive MainWindow InitializeComponent.
+        // By the time the window is shown, the monitor should already be running.
+        StartMonitorWarmup();
+
+        ApplyTheme(Preferences.Theme);
+        SystemEvents.UserPreferenceChanged += this.OnSystemThemeChanged;
+        IsPrivacyMode = Preferences.IsPrivacyMode;
+
+        this.InitializeTrayIcon();
+
+        this._mainWindow = Host.Services.GetRequiredService<MainWindow>();
+        this._mainWindow.Show();
+    }
+
+    protected override async void OnExit(ExitEventArgs e)
+    {
+        SystemEvents.UserPreferenceChanged -= this.OnSystemThemeChanged;
+        this._trayIcon?.Dispose();
+        foreach (var tray in this._providerTrayIcons.Values)
+        {
+            tray.Dispose();
+        }
+
+        this._providerTrayIcons.Clear();
+
+        using (Host)
+        {
+            await Host.StopAsync().ConfigureAwait(true);
+        }
+
+        this._singleInstanceLockService?.Release();
+        base.OnExit(e);
+    }
+#pragma warning restore VSTHRD100
+
+    private void OnSystemThemeChanged(object sender, UserPreferenceChangedEventArgs e)
+    {
+        if (e.Category == UserPreferenceCategory.General && Preferences.Theme == AppTheme.System)
+        {
+            ApplyTheme(AppTheme.System);
+        }
+    }
+
+    private static void ConfigureServices(IServiceCollection services)
+    {
+        ProviderMetadataCatalog.Initialize(typeof(ProviderRegistrationExtensions).Assembly);
+
+        // Infrastructure
+        services.AddSingleton<IAppPathProvider, AIUsageTracker.Infrastructure.Helpers.DefaultAppPathProvider>();
+        services.AddSingleton<UiPreferencesStore>();
+        services.AddSingleton<MonitorLauncher>();
+        services.AddSingleton<IMonitorService, MonitorService>();
+        services.AddSingleton<MonitorLifecycleService>();
+        services.AddSingleton<GitHubUpdateChecker>(sp =>
+            new GitHubUpdateChecker(
+                sp.GetRequiredService<ILogger<GitHubUpdateChecker>>(),
+                sp.GetRequiredService<HttpClient>(),
+                Preferences.UpdateChannel));
+        services.AddSingleton<Func<UpdateChannel, GitHubUpdateChecker>>(sp => channel =>
+            new GitHubUpdateChecker(
+                sp.GetRequiredService<ILogger<GitHubUpdateChecker>>(),
+                sp.GetRequiredService<HttpClient>(),
+                channel));
+        services.AddSingleton<HttpClient>();
+        services.AddHttpClient("LocalhostProbe")
+            .ConfigureHttpClient(c => c.Timeout = TimeSpan.FromSeconds(1));
+
+        // UI Services
+        services.AddSingleton<SingleInstanceLockService>();
+        services.AddSingleton<Func<SettingsWindow>>(sp => () => sp.GetRequiredService<SettingsWindow>());
+        services.AddSingleton<Func<InfoDialog>>(sp => () => sp.GetRequiredService<InfoDialog>());
+        services.AddSingleton<IDialogService, DialogService>();
+        services.AddSingleton<IBrowserService, BrowserService>();
+
+        // ViewModels
+        services.AddSingleton<MainViewModel>();
+
+        // Windows
+        services.AddSingleton<MainWindow>();
+        services.AddTransient<SettingsWindow>();
+        services.AddTransient<InfoDialog>();
+
+        services.AddLogging(builder =>
+        {
+            builder.ClearProviders();
+            builder.AddSimpleConsole(options =>
+            {
+                options.TimestampFormat = "HH:mm:ss.fff ";
+                options.SingleLine = true;
+            });
+            builder.AddDebug();
+        });
+    }
+}

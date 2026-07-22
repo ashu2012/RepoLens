@@ -1,0 +1,86 @@
+// <copyright file="ExportService.cs" company="AIUsageTracker">
+// Copyright (c) AIUsageTracker. All rights reserved.
+// </copyright>
+
+using System.Globalization;
+using System.Text;
+using System.Text.Json;
+using AIUsageTracker.Core.Models;
+
+namespace AIUsageTracker.Monitor.Services;
+
+public class ExportService
+{
+    private readonly IUsageDatabase _database;
+
+    public ExportService(IUsageDatabase database)
+    {
+        this._database = database;
+    }
+
+    public async Task<(byte[] Content, string ContentType, string FileName)> ExportAsync(string format, int days)
+    {
+        ArgumentNullException.ThrowIfNull(format);
+
+        // Limit days to reasonable range
+        if (days < 1)
+        {
+            days = 1;
+        }
+
+        if (days > 365)
+        {
+            days = 365;
+        }
+
+        // Estimate limit based on days (assuming ~100 requests/day max for safety)
+        var limit = days * 100;
+        var history = await this._database.GetHistoryAsync(limit).ConfigureAwait(false);
+
+        // Filter by date
+        var cutoff = DateTime.UtcNow.AddDays(-days);
+        history = history.Where(h => h.FetchedAt >= cutoff).ToList();
+
+        if (format.Equals("json", StringComparison.OrdinalIgnoreCase))
+        {
+            var json = JsonSerializer.Serialize(history, new JsonSerializerOptions { WriteIndented = true });
+            return (Encoding.UTF8.GetBytes(json), "application/json", $"usage_export_{DateTime.Now:yyyyMMdd}.json");
+        }
+        else
+        {
+            var csv = new StringBuilder();
+            csv.AppendLine("Time,Provider,Model,Used,Cost,PlanType");
+
+            foreach (var item in history)
+            {
+                var time = item.FetchedAt.ToString("yyyy-MM-dd HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture);
+                var provider = EscapeCsv(item.ProviderName);
+
+                var isCurrency = item is QuotaProviderUsage q && q.IsCurrencyUsage;
+                var requestsUsed = item is QuotaProviderUsage q2 ? q2.RequestsUsed : 0;
+                var planType = item is QuotaProviderUsage q3 ? q3.PlanType : Core.Models.PlanType.Usage;
+                var used = isCurrency
+                    ? $"${requestsUsed.ToString("F2", CultureInfo.InvariantCulture)}"
+                    : requestsUsed.ToString("F2", CultureInfo.InvariantCulture);
+                csv.AppendLine($"{time},{provider},(Total),{used},,{planType}");
+            }
+
+            return (Encoding.UTF8.GetBytes(csv.ToString()), "text/csv", $"usage_export_{DateTime.Now:yyyyMMdd}.csv");
+        }
+    }
+
+    private static string EscapeCsv(string field)
+    {
+        if (string.IsNullOrEmpty(field))
+        {
+            return string.Empty;
+        }
+
+        if (field.Contains(",", StringComparison.Ordinal) || field.Contains("\"", StringComparison.Ordinal) || field.Contains("\n", StringComparison.Ordinal))
+        {
+            return $"\"{field.Replace("\"", "\"\"", StringComparison.Ordinal)}\"";
+        }
+
+        return field;
+    }
+}
