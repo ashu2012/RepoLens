@@ -1,0 +1,335 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+
+const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-usage-analytics-route-"));
+process.env.DATA_DIR = TEST_DATA_DIR;
+const ORIGINAL_API_KEY_SECRET = process.env.API_KEY_SECRET;
+process.env.API_KEY_SECRET = "test-usage-analytics-secret";
+
+const core = await import("../../src/lib/db/core.ts");
+const localDb = await import("../../src/lib/localDb.ts");
+const apiKeysDb = await import("../../src/lib/db/apiKeys.ts");
+const providersDb = await import("../../src/lib/db/providers.ts");
+const usageHistory = await import("../../src/lib/usage/usageHistory.ts");
+const analyticsRoute = await import("../../src/app/api/usage/analytics/route.ts");
+
+const clearPendingRequests = usageHistory.clearPendingRequests;
+const EXPECTED_TOTAL_COST = 0.020925;
+
+async function resetStorage() {
+  core.resetDbInstance();
+  apiKeysDb.resetApiKeyState();
+  fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true });
+  fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
+  clearPendingRequests();
+}
+
+async function seedAnalyticsData() {
+  const db = core.getDbInstance();
+  const now = new Date();
+  for (let i = 0; i < 20; i++) {
+    const timestamp = new Date(now.getTime() - i * 60 * 60 * 1000).toISOString();
+    db.prepare(
+      `INSERT INTO usage_history (provider, model, connection_id, api_key_id, api_key_name, tokens_input, tokens_output, success, latency_ms, timestamp)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      i % 2 === 0 ? "openai" : "anthropic",
+      i % 2 === 0 ? "gpt-4o" : "claude-sonnet",
+      "test-conn",
+      "test-key",
+      "Primary Key",
+      100 + i,
+      50 + i,
+      1,
+      200 + i * 10,
+      timestamp
+    );
+  }
+  db.prepare(
+    `INSERT INTO call_logs (provider, model, requested_model, connection_id, timestamp)
+     VALUES (?, ?, ?, ?, ?)`
+  ).run("openai", "gpt-4o", "gpt-4o-mini", "test-conn", new Date().toISOString());
+}
+
+function makeRequest(url: string) {
+  return new Request(url, { method: "GET" });
+}
+
+function assertClose(actual: number, expected: number, epsilon = 0.000001) {
+  assert.ok(
+    Math.abs(actual - expected) <= epsilon,
+    `expected ${actual} to be within ${epsilon} of ${expected}`
+  );
+}
+
+test.beforeEach(async () => {
+  await resetStorage();
+  await localDb.updatePricing({
+    openai: { "gpt-4o": { input: 2.5, output: 10 } },
+    anthropic: { "claude-sonnet": { input: 3, output: 15 } },
+  });
+});
+
+test.after(() => {
+  core.resetDbInstance();
+  apiKeysDb.resetApiKeyState();
+  fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true });
+
+  if (ORIGINAL_API_KEY_SECRET === undefined) {
+    delete process.env.API_KEY_SECRET;
+  } else {
+    process.env.API_KEY_SECRET = ORIGINAL_API_KEY_SECRET;
+  }
+});
+
+test("GET /api/usage/analytics returns summary with aggregated metrics", async () => {
+  await seedAnalyticsData();
+
+  const response = await analyticsRoute.GET(makeRequest("http://localhost/api/usage/analytics"));
+  const body = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(body.summary.totalRequests, 20);
+  assert.equal(body.summary.uniqueModels, 2);
+  assert.equal(body.summary.uniqueAccounts, 1);
+  assert.equal(body.summary.uniqueApiKeys, 1);
+  assert.ok(body.summary.totalTokens > 0);
+  assert.ok(body.summary.avgLatencyMs > 0);
+  assertClose(body.summary.totalCost, EXPECTED_TOTAL_COST);
+  assert.ok(body.summary.streak > 0);
+});
+
+test("GET /api/usage/analytics includes dailyTrend array with cost data", async () => {
+  await seedAnalyticsData();
+
+  const response = await analyticsRoute.GET(makeRequest("http://localhost/api/usage/analytics"));
+  const body = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.ok(Array.isArray(body.dailyTrend));
+  assert.ok(body.dailyTrend.length > 0);
+  assert.ok(body.dailyTrend.every((row) => typeof row.cost === "number"));
+  const dailyCostTotal = body.dailyTrend.reduce((sum, row) => sum + row.cost, 0);
+  assertClose(dailyCostTotal, body.summary.totalCost);
+});
+
+test("GET /api/usage/analytics includes byModel array with cost calculations", async () => {
+  await seedAnalyticsData();
+
+  const response = await analyticsRoute.GET(makeRequest("http://localhost/api/usage/analytics"));
+  const body = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.ok(Array.isArray(body.byModel));
+  assert.ok(body.byModel.length > 0);
+  const gptEntry = body.byModel.find(
+    (m) => (m.model === "4o" || m.model === "gpt-4o") && m.provider === "openai"
+  );
+  assert.ok(gptEntry);
+  assert.ok(typeof gptEntry.cost === "number");
+  assert.ok(gptEntry.cost > 0);
+});
+
+test("GET /api/usage/analytics resolves Codex GPT-5.5 pricing through provider aliases", async () => {
+  const db = core.getDbInstance();
+  db.prepare(
+    `INSERT INTO usage_history (provider, model, connection_id, tokens_input, tokens_output, success, latency_ms, timestamp)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run("codex", "gpt-5.5", "codex-conn", 1000, 500, 1, 250, new Date().toISOString());
+
+  const response = await analyticsRoute.GET(makeRequest("http://localhost/api/usage/analytics"));
+  const body = await response.json();
+
+  assert.equal(response.status, 200);
+  assertClose(body.summary.totalCost, 0.02);
+  assert.equal(body.byProvider[0].provider, "OpenAI Codex");
+  assertClose(body.byProvider[0].cost, 0.02);
+  assert.equal(body.byModel[0].model, "gpt-5.5");
+  assertClose(body.byModel[0].cost, 0.02);
+});
+
+test("GET /api/usage/analytics applies Codex Fast tier multipliers and exposes tier split", async () => {
+  const db = core.getDbInstance();
+  const timestamp = new Date().toISOString();
+  db.prepare(
+    `INSERT INTO usage_history (provider, model, connection_id, tokens_input, tokens_output, success, latency_ms, service_tier, timestamp)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run("codex", "gpt-5.5", "codex-fast", 1000, 500, 1, 250, "priority", timestamp);
+  db.prepare(
+    `INSERT INTO usage_history (provider, model, connection_id, tokens_input, tokens_output, success, latency_ms, service_tier, timestamp)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run("codex", "gpt-5.5", "codex-standard", 1000, 500, 1, 250, "standard", timestamp);
+  db.prepare(
+    `INSERT INTO usage_history (provider, model, connection_id, tokens_input, tokens_output, success, latency_ms, service_tier, timestamp)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run("codex", "gpt-5.5", "codex-flex", 1000, 500, 1, 250, "flex", timestamp);
+
+  const response = await analyticsRoute.GET(
+    makeRequest("http://localhost/api/usage/analytics?presets=1d")
+  );
+  const body = await response.json();
+
+  assert.equal(response.status, 200);
+  assertClose(body.summary.totalCost, 0.08);
+  assert.equal(body.summary.fastRequests, 1);
+  assert.equal(body.summary.flexRequests, 1);
+  assert.equal(body.summary.standardRequests, 1);
+  assertClose(body.summary.fastCost, 0.05);
+  assertClose(body.summary.flexCost, 0.01);
+  assertClose(body.summary.flexSavings, 0.01);
+  assert.equal(body.summary.flexUsageSavingsTokens, 750);
+  assertClose(body.summary.standardCost, 0.02);
+  assert.equal(body.byServiceTier.length, 3);
+  assert.deepEqual(
+    body.byServiceTier.map((tier: { serviceTier: string }) => tier.serviceTier),
+    ["priority", "flex", "standard"]
+  );
+  const flexTier = body.byServiceTier.find(
+    (tier: { serviceTier: string }) => tier.serviceTier === "flex"
+  );
+  assert.equal(flexTier.label, "flex");
+  assertClose(flexTier.savings, 0.01);
+  assert.equal(flexTier.usageSavingsTokens, 750);
+  assertClose(body.byProvider[0].cost, 0.08);
+  assertClose(body.byModel[0].cost, 0.08);
+  assertClose(body.presetSummaries["1d"].totalCost, 0.08);
+});
+
+test("GET /api/usage/analytics does not report flex savings for non-Codex providers", async () => {
+  const db = core.getDbInstance();
+  db.prepare(
+    `INSERT INTO usage_history (provider, model, connection_id, tokens_input, tokens_output, success, latency_ms, service_tier, timestamp)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run("openai", "gpt-4o", "openai-flex", 1000, 500, 1, 250, "flex", new Date().toISOString());
+
+  const response = await analyticsRoute.GET(makeRequest("http://localhost/api/usage/analytics"));
+  const body = await response.json();
+
+  assert.equal(response.status, 200);
+  assertClose(body.summary.totalCost, 0.0075);
+  assert.equal(body.summary.flexRequests, 1);
+  assertClose(body.summary.flexCost, 0.0075);
+  assertClose(body.summary.flexSavings, 0);
+  assert.equal(body.summary.flexUsageSavingsTokens, 0);
+  const flexTier = body.byServiceTier.find(
+    (tier: { serviceTier: string }) => tier.serviceTier === "flex"
+  );
+  assertClose(flexTier.savings, 0);
+  assert.equal(flexTier.usageSavingsTokens, 0);
+});
+
+test("GET /api/usage/analytics applies Codex GPT-5.6 Sol Fast multiplier", async () => {
+  await localDb.updatePricing({
+    codex: { "gpt-5.6-sol": { input: 5, output: 30 } },
+  });
+  const db = core.getDbInstance();
+  db.prepare(
+    `INSERT INTO usage_history (provider, model, connection_id, tokens_input, tokens_output, success, latency_ms, service_tier, timestamp)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    "codex",
+    "gpt-5.6-sol",
+    "codex-fast",
+    1000,
+    500,
+    1,
+    250,
+    "priority",
+    new Date().toISOString()
+  );
+
+  const response = await analyticsRoute.GET(makeRequest("http://localhost/api/usage/analytics"));
+  const body = await response.json();
+
+  assert.equal(response.status, 200);
+  assertClose(body.summary.totalCost, 0.03);
+  assertClose(body.summary.fastCost, 0.03);
+});
+
+test("GET /api/usage/analytics maps Codex auto-review usage to GPT-5.5 pricing", async () => {
+  const db = core.getDbInstance();
+  db.prepare(
+    `INSERT INTO usage_history (provider, model, connection_id, tokens_input, tokens_output, success, latency_ms, timestamp)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run("codex", "codex-auto-review", "codex-conn", 1000, 500, 1, 250, new Date().toISOString());
+
+  const response = await analyticsRoute.GET(makeRequest("http://localhost/api/usage/analytics"));
+  const body = await response.json();
+
+  assert.equal(response.status, 200);
+  assertClose(body.summary.totalCost, 0.02);
+  assert.equal(body.byModel[0].model, "codex-auto-review");
+  assertClose(body.byModel[0].cost, 0.02);
+});
+
+test("GET /api/usage/analytics ignores normal combo routing in fallback statistics", async () => {
+  const db = core.getDbInstance();
+  const timestamp = new Date().toISOString();
+  db.prepare(
+    `INSERT INTO usage_history (provider, model, connection_id, tokens_input, tokens_output, success, latency_ms, timestamp)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run("codex", "gpt-5.5", "codex-conn", 1000, 500, 1, 250, timestamp);
+  db.prepare(
+    `INSERT INTO call_logs (id, provider, model, requested_model, combo_name, connection_id, timestamp)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`
+  ).run("combo-call", "codex", "gpt-5.5", "combo/dev", "dev", "codex-conn", timestamp);
+  db.prepare(
+    `INSERT INTO call_logs (id, provider, model, requested_model, connection_id, timestamp)
+     VALUES (?, ?, ?, ?, ?, ?)`
+  ).run("same-model-call", "codex", "GPT-5.5", "gpt-5.5", "codex-conn", timestamp);
+
+  const response = await analyticsRoute.GET(makeRequest("http://localhost/api/usage/analytics"));
+  const body = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(body.summary.fallbackCount, 0);
+  assert.equal(body.summary.fallbackRatePct, 0);
+  assert.equal(body.summary.requestedModelCoveragePct, 100);
+});
+
+test("GET /api/usage/analytics filters by range parameter", async () => {
+  await seedAnalyticsData();
+
+  const response = await analyticsRoute.GET(
+    makeRequest("http://localhost/api/usage/analytics?range=1d")
+  );
+  const body = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(body.range, "1d");
+});
+
+test("GET /api/usage/analytics includes byProvider array with cost data", async () => {
+  await seedAnalyticsData();
+
+  const response = await analyticsRoute.GET(makeRequest("http://localhost/api/usage/analytics"));
+  const body = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.ok(Array.isArray(body.byProvider));
+  assert.ok(body.byProvider.length > 0);
+  assert.ok(body.byProvider.every((row) => typeof row.cost === "number"));
+  const providerCostTotal = body.byProvider.reduce((sum, row) => sum + row.cost, 0);
+  assertClose(providerCostTotal, body.summary.totalCost);
+});
+
+test("GET /api/usage/analytics includes byAccount array with cost data", async () => {
+  await seedAnalyticsData();
+
+  const response = await analyticsRoute.GET(makeRequest("http://localhost/api/usage/analytics"));
+  const body = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.ok(Array.isArray(body.byAccount));
+  assert.ok(body.byAccount.length > 0);
+  assert.ok(body.byAccount.every((row) => row.account === "test-conn"));
+  assert.ok(body.byAccount.every((row) => typeof row.cost === "number"));
+  assertClose(
+    body.byAccount.reduce((sum, row) => sum + row.cost, 0),
+    body.summary.totalCost
+  );
+});
+
