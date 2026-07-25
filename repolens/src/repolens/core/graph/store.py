@@ -11,13 +11,22 @@ import networkx as nx
 
 
 class GraphStore:
-    def __init__(self, db_path: str | Path):
+    def __init__(self, db_path: str | Path, read_only: bool = False):
         self.db_path = Path(db_path)
-        self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._init_db()
+        self.read_only = read_only
+        if not read_only:
+            self.db_path.parent.mkdir(parents=True, exist_ok=True)
+            self._init_db()
 
     def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.db_path, timeout=30)
+        if self.read_only:
+            conn = sqlite3.connect(
+                f"{self.db_path.resolve().as_uri()}?mode=ro",
+                timeout=30,
+                uri=True,
+            )
+        else:
+            conn = sqlite3.connect(self.db_path, timeout=30)
         conn.row_factory = sqlite3.Row
         return conn
 

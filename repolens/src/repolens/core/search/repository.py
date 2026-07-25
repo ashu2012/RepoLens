@@ -17,7 +17,7 @@ class RepositorySearch:
         index_path = self.repo_path / ".repolens" / "index.db"
         if not index_path.exists():
             raise FileNotFoundError(f"Repository is not indexed: {self.repo_path}")
-        self.store = GraphStore(index_path)
+        self.store = GraphStore(index_path, read_only=True)
 
     @staticmethod
     def _cosine(left: list[float], right: list[float]) -> float:

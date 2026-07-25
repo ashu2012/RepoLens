@@ -213,4 +213,33 @@ async def test_mcp_search_and_context_tools_use_persisted_index(tmp_path, monkey
         {
             "id": "catalog",
             "name": "catalog",
-    
+            "local_path": str(tmp_path),
+            "status": "indexed",
+            "files_count": 1,
+            "is_git": False,
+            "created_at": 1.0,
+        }
+    )
+    durable_registry.update_repo(
+        "catalog",
+        symbols_count=result.symbols_extracted,
+        edges_count=result.edges_resolved,
+        chunks_count=result.stats["total_chunks"],
+        last_indexed=1.0,
+    )
+    registry_module = importlib.import_module("repolens.core.persistence.registry")
+    persistence_package = importlib.import_module("repolens.core.persistence")
+    monkeypatch.setattr(registry_module, "registry", durable_registry)
+    monkeypatch.setattr(persistence_package, "registry", durable_registry)
+
+    names = {tool.name for tool in await mcp.list_tools()}
+    assert {"search_semantic", "search_symbols", "get_context", "get_health"} <= names
+    search_result = await mcp.call_tool(
+        "search_symbols", {"name": "lookup_product", "repo_id": "catalog"}
+    )
+    assert "lookup_product" in str(search_result)
+    context_result = await mcp.call_tool(
+        "get_context",
+        {"targets": ["lookup_product"], "budget": 200, "repo_id": "catalog"},
+    )
+    assert "def lookup_product" in str(context_result)

@@ -129,27 +129,149 @@ Kotlin, C#, PHP, Swift, Scala, and shell files through `tree-sitter-language-pac
 
 Legend: ✅ usable · 🧪 experimental · 🚧 in progress · 📋 planned
 
-## MCP
+## Use RepoLens with AI coding tools
 
-The intended client configuration is:
+RepoLens runs as a local stdio MCP server. Install it first and index at least one repository
+from the Web dashboard:
+
+```bash
+cd /absolute/path/to/RepoLens/repolens
+python -m pip install -e .
+python -m repolens serve
+```
+
+All clients must use the same `REPOLENS_DATA_DIR` as the Web server so they can find its persistent
+repository registry. In the examples below, replace both absolute paths with paths on your
+machine:
+
+```text
+Python:   /absolute/path/to/RepoLens/repolens/.venv/bin/python
+Windows:  C:\absolute\path\to\RepoLens\repolens\.venv\Scripts\python.exe
+Data:     /absolute/path/to/RepoLens/repolens/.repolens
+```
+
+Using the virtual environment's full Python path is the most reliable option. If `python` already
+resolves to the environment where RepoLens is installed, you can use `"python"` instead.
+
+### Claude Code
+
+Add RepoLens to the current project:
+
+```bash
+claude mcp add --transport stdio --scope project \
+  --env REPOLENS_DATA_DIR=/absolute/path/to/RepoLens/repolens/.repolens \
+  repolens -- /absolute/path/to/RepoLens/repolens/.venv/bin/python -m repolens mcp
+```
+
+On Windows PowerShell:
+
+```powershell
+claude mcp add --transport stdio --scope project `
+  --env REPOLENS_DATA_DIR=C:\absolute\path\to\RepoLens\repolens\.repolens `
+  repolens -- C:\absolute\path\to\RepoLens\repolens\.venv\Scripts\python.exe -m repolens mcp
+```
+
+Alternatively, create `.mcp.json` in the project:
 
 ```json
 {
   "mcpServers": {
     "repolens": {
-      "command": "repolens",
-      "args": ["mcp"]
+      "type": "stdio",
+      "command": "/absolute/path/to/RepoLens/repolens/.venv/bin/python",
+      "args": ["-m", "repolens", "mcp"],
+      "env": {
+        "REPOLENS_DATA_DIR": "/absolute/path/to/RepoLens/repolens/.repolens"
+      }
     }
   }
 }
 ```
 
-The MCP surface includes semantic and symbol search, budgeted context assembly, callers/callees,
-recent changes, architecture, and health. Pass `repo_id` when multiple repositories are indexed.
+Run `claude mcp list` to verify registration, then use `/mcp` inside Claude Code to inspect the
+connection. See the official [Claude Code MCP documentation](https://docs.anthropic.com/en/docs/claude-code/mcp).
 
-By default RepoLens uses deterministic offline vectors so the complete local-RAG path works
-without a service. Set `REPOLENS_EMBEDDING_PROVIDER=ollama` to use a local semantic embedding
-model; see [the indexing guide](docs/indexing.md).
+### OpenAI Codex
+
+Add RepoLens from the Codex CLI:
+
+```bash
+codex mcp add repolens \
+  --env REPOLENS_DATA_DIR=/absolute/path/to/RepoLens/repolens/.repolens \
+  -- /absolute/path/to/RepoLens/repolens/.venv/bin/python -m repolens mcp
+```
+
+Or add it to Codex configuration:
+
+```toml
+[mcp_servers.repolens]
+command = "/absolute/path/to/RepoLens/repolens/.venv/bin/python"
+args = ["-m", "repolens", "mcp"]
+
+[mcp_servers.repolens.env]
+REPOLENS_DATA_DIR = "/absolute/path/to/RepoLens/repolens/.repolens"
+```
+
+Use project-level `.codex/config.toml` when the server should apply only to one trusted
+repository, or your Codex user configuration when it should be available across projects. Restart
+Codex after changing the file. Run `codex mcp list` to verify registration, then ask it to list
+indexed repositories with RepoLens.
+
+### VS Code
+
+Recent VS Code versions support MCP servers in workspace-level `.vscode/mcp.json`. Create:
+
+```json
+{
+  "servers": {
+    "repolens": {
+      "type": "stdio",
+      "command": "/absolute/path/to/RepoLens/repolens/.venv/bin/python",
+      "args": ["-m", "repolens", "mcp"],
+      "env": {
+        "REPOLENS_DATA_DIR": "/absolute/path/to/RepoLens/repolens/.repolens"
+      }
+    }
+  }
+}
+```
+
+Open the Command Palette and run **MCP: List Servers**, select `repolens`, and start it. The first
+start may show a trust confirmation. If tools changed after an update, run
+**MCP: Reset Cached Tools** and restart the server. See the official
+[VS Code MCP server guide](https://code.visualstudio.com/docs/agent-customization/mcp-servers).
+
+### Verify the connection
+
+Ask the client:
+
+```text
+Use RepoLens to list indexed repositories. Then search for the symbol
+"PipelineOrchestrator" and return its file path and callers.
+```
+
+The client should invoke `list_repos`, `search_symbols`, and optionally `find_callers`. When more
+than one repository is indexed, include the returned `repo_id` in subsequent tool calls.
+
+You can test the same tools without an MCP client from the local
+[OpenAPI page](http://127.0.0.1:8420/api/docs) using `GET /api/mcp/tools` and
+`POST /api/mcp/call`.
+
+The MCP surface includes hybrid search, symbol search, budgeted context assembly, callers/callees,
+recent changes, architecture, and health. By default RepoLens uses deterministic offline vectors.
+Set `REPOLENS_EMBEDDING_PROVIDER=ollama` to use a local semantic embedding model; see the
+[indexing guide](docs/indexing.md).
+
+### Troubleshooting
+
+- **Server exits immediately:** use the absolute Python executable from the RepoLens virtual
+  environment.
+- **No repositories returned:** confirm the MCP process and Web server use the same absolute
+  `REPOLENS_DATA_DIR`.
+- **Tools are missing:** restart the client or clear its cached MCP tools.
+- **Permission error:** the MCP process must be able to read the registered repository and its
+  `.repolens/index.db`.
+- **Multiple repositories:** call `list_repos` first and pass the desired `repo_id`.
 
 ## Project layout
 

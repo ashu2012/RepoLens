@@ -35,6 +35,57 @@ Content-Type: application/json
 Modes are `bm25`, `semantic`, and `hybrid`. Hybrid mode uses reciprocal-rank fusion across
 keyword and vector results. `GET /api/search/symbols` provides exact/partial AST symbol lookup.
 
+For quick browser testing, the same search is available with query parameters:
+
+```text
+GET /api/search?repo_id=<id>&query=calculate%20invoice&mode=hybrid&top_k=10
+```
+
+Opening `/api/search` without the required `query` parameter returns validation guidance.
+
+## Testing MCP tools through OpenAPI
+
+The FastAPI bridge makes MCP tools testable from
+`http://127.0.0.1:8420/api/docs` without starting a separate MCP client:
+
+- `GET /api/mcp/tools` lists registered tools, descriptions, and input schemas.
+- `POST /api/mcp/call` executes one registered MCP tool.
+
+Example request:
+
+```json
+{
+  "tool": "search_symbols",
+  "arguments": {
+    "name": "calculate_invoice",
+    "repo_id": "your-repository-id"
+  }
+}
+```
+
+Example response shape:
+
+```json
+{
+  "tool": "search_symbols",
+  "arguments": {
+    "name": "calculate_invoice",
+    "repo_id": "your-repository-id"
+  },
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "[...]"
+      }
+    ]
+  }
+}
+```
+
+This bridge is intended for local development and OpenAPI exploration. Native MCP clients should
+continue using the configured MCP transport.
+
 ## MCP configuration
 
 ```json
