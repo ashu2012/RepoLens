@@ -1,0 +1,2 @@
+[console_scripts]
+repolens = repolens.cli.main:cli

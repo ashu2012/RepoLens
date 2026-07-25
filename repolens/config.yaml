@@ -1,0 +1,35 @@
+repositories: []
+
+scheduler:
+  full_index_cron: "0 2 * * *"
+  incremental_cron: "*/15 * * * *"
+  polling_interval_minutes: 15
+  staleness_check_minutes: 30
+
+embedding:
+  provider: mock
+  model: nomic-embed-text
+  fallback_provider: openai
+  dimension: 768
+
+vector_store:
+  backend: lancedb
+  path: .repolens/vectors
+
+database:
+  url: sqlite+aiosqlite:///.repolens/repolens.db
+
+server:
+  host: 127.0.0.1
+  port: 8420
+  mcp_transport: stdio
+
+observability:
+  enable_prometheus: true
+  metrics_port: 9090
+  enable_dashboard: true
+  log_level: INFO
+  alert_thresholds:
+    mcp_latency_p95_ms: 2000
+    pipeline_duration_warn_s: 300
+    embedding_error_rate_pct: 5

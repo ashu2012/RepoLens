@@ -1,0 +1,746 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RepoLens — Code Intelligence Dashboard</title>
+    <style>
+        :root {
+            --bg-primary: #0a0e17;
+            --bg-card: #111827;
+            --bg-card-hover: #1a2332;
+            --border: #1e293b;
+            --text-primary: #e2e8f0;
+            --text-secondary: #94a3b8;
+            --text-muted: #64748b;
+            --accent-blue: #3b82f6;
+            --accent-green: #10b981;
+            --accent-purple: #8b5cf6;
+            --accent-amber: #f59e0b;
+            --accent-red: #ef4444;
+            --accent-cyan: #06b6d4;
+            --gradient-blue: linear-gradient(135deg, #3b82f6, #6366f1);
+            --gradient-green: linear-gradient(135deg, #10b981, #06b6d4);
+            --gradient-purple: linear-gradient(135deg, #8b5cf6, #ec4899);
+            --gradient-amber: linear-gradient(135deg, #f59e0b, #ef4444);
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+        }
+        /* Header */
+        .header {
+            background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 50%, #0f172a 100%);
+            border-bottom: 1px solid var(--border);
+            padding: 1.5rem 2rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .header-left { display: flex; align-items: center; gap: 1rem; }
+        .logo {
+            font-size: 1.5rem;
+            font-weight: 800;
+            background: var(--gradient-blue);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            letter-spacing: -0.5px;
+        }
+        .logo-icon { font-size: 1.8rem; }
+        .status-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.4rem;
+            padding: 0.25rem 0.75rem;
+            border-radius: 9999px;
+            font-size: 0.75rem;
+            font-weight: 600;
+        }
+        .status-healthy { background: rgba(16, 185, 129, 0.15); color: var(--accent-green); border: 1px solid rgba(16, 185, 129, 0.3); }
+        .status-dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; animation: pulse 2s infinite; }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+        /* Navigation */
+        .nav { display: flex; gap: 0.5rem; }
+        .nav a {
+            color: var(--text-secondary);
+            text-decoration: none;
+            padding: 0.5rem 1rem;
+            border-radius: 0.5rem;
+            font-size: 0.85rem;
+            font-weight: 500;
+            transition: all 0.2s;
+        }
+        .nav a:hover { background: var(--bg-card); color: var(--text-primary); }
+        .nav a.active { background: var(--accent-blue); color: white; }
+
+        /* Main Layout */
+        .main { padding: 2rem; max-width: 1600px; margin: 0 auto; }
+
+        /* Section Headers */
+        .section-title {
+            font-size: 0.85rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: var(--text-muted);
+            margin-bottom: 1rem;
+            padding-bottom: 0.5rem;
+            border-bottom: 1px solid var(--border);
+        }
+
+        /* Quick Links Bar */
+        .quick-links {
+            display: flex;
+            gap: 0.75rem;
+            margin-bottom: 2rem;
+            flex-wrap: wrap;
+        }
+        .quick-link {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.6rem 1.2rem;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 0.75rem;
+            color: var(--text-secondary);
+            text-decoration: none;
+            font-size: 0.85rem;
+            font-weight: 500;
+            transition: all 0.2s;
+        }
+        .quick-link:hover {
+            border-color: var(--accent-blue);
+            color: var(--text-primary);
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(59, 130, 246, 0.1);
+        }
+        .quick-link .icon { font-size: 1.1rem; }
+
+        /* Stats Grid */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+            margin-bottom: 2rem;
+        }
+        .stat-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 1rem;
+            padding: 1.25rem;
+            transition: all 0.2s;
+        }
+        .stat-card:hover { border-color: var(--accent-blue); transform: translateY(-2px); }
+        .stat-label { font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 0.5rem; }
+        .stat-value { font-size: 2rem; font-weight: 800; line-height: 1; }
+        .stat-change { font-size: 0.75rem; margin-top: 0.5rem; }
+        .stat-up { color: var(--accent-green); }
+        .stat-down { color: var(--accent-red); }
+
+        /* Panel Grid */
+        .panel-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(450px, 1fr));
+            gap: 1.5rem;
+            margin-bottom: 2rem;
+        }
+        .panel {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 1rem;
+            overflow: hidden;
+        }
+        .panel-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 1rem 1.5rem;
+            border-bottom: 1px solid var(--border);
+        }
+        .panel-title { font-size: 0.9rem; font-weight: 700; display: flex; align-items: center; gap: 0.5rem; }
+        .panel-badge {
+            font-size: 0.7rem;
+            padding: 0.15rem 0.5rem;
+            border-radius: 9999px;
+            background: rgba(59, 130, 246, 0.15);
+            color: var(--accent-blue);
+        }
+        .panel-body { padding: 1.25rem 1.5rem; }
+
+        /* Table */
+        .data-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+        .data-table th { text-align: left; padding: 0.5rem 0; color: var(--text-muted); font-weight: 600; font-size: 0.75rem; text-transform: uppercase; border-bottom: 1px solid var(--border); }
+        .data-table td { padding: 0.6rem 0; border-bottom: 1px solid rgba(30, 41, 59, 0.5); }
+        .data-table tr:last-child td { border-bottom: none; }
+        .data-table tr:hover td { background: rgba(59, 130, 246, 0.03); }
+
+        /* Progress Bar */
+        .progress-bar { height: 6px; border-radius: 3px; background: var(--border); overflow: hidden; }
+        .progress-fill { height: 100%; border-radius: 3px; transition: width 0.5s ease; }
+
+        /* Tags */
+        .tag { display: inline-block; padding: 0.15rem 0.5rem; border-radius: 0.25rem; font-size: 0.7rem; font-weight: 600; }
+        .tag-success { background: rgba(16, 185, 129, 0.15); color: var(--accent-green); }
+        .tag-warning { background: rgba(245, 158, 11, 0.15); color: var(--accent-amber); }
+        .tag-error { background: rgba(239, 68, 68, 0.15); color: var(--accent-red); }
+        .tag-info { background: rgba(59, 130, 246, 0.15); color: var(--accent-blue); }
+
+        /* Event Log */
+        .event-log { max-height: 300px; overflow-y: auto; }
+        .event-item { display: flex; gap: 0.75rem; padding: 0.5rem 0; border-bottom: 1px solid rgba(30, 41, 59, 0.3); font-size: 0.8rem; }
+        .event-time { color: var(--text-muted); white-space: nowrap; font-family: 'JetBrains Mono', monospace; font-size: 0.75rem; }
+        .event-msg { color: var(--text-secondary); }
+
+        /* Refresh indicator */
+        .refresh-indicator {
+            position: fixed;
+            bottom: 1.5rem;
+            right: 1.5rem;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 0.75rem;
+            padding: 0.5rem 1rem;
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            .panel-grid { grid-template-columns: 1fr; }
+            .stats-grid { grid-template-columns: repeat(2, 1fr); }
+            .header { flex-direction: column; gap: 1rem; }
+        }
+    </style>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+</head>
+<body>
+    <!-- Header -->
+    <header class="header">
+        <div class="header-left">
+            <span class="logo-icon">🔍</span>
+            <span class="logo">RepoLens</span>
+            <span class="status-badge status-healthy">
+                <span class="status-dot"></span>
+                <span id="system-status">Operational</span>
+            </span>
+        </div>
+        <nav class="nav">
+            <a href="#overview" class="active">Overview</a>
+            <a href="#pipeline">Pipeline</a>
+            <a href="#mcp">MCP Server</a>
+            <a href="#search">Search & RAG</a>
+            <a href="#tokens">Token Savings</a>
+            <a href="#repos">Repositories</a>
+            <a href="/api/docs" target="_blank">API Docs</a>
+        </nav>
+    </header>
+
+    <main class="main">
+        <!-- Quick Links: Control Center -->
+        <div class="section-title">⚡ Control Center</div>
+        <div class="quick-links">
+            <a href="/api/repos" class="quick-link"><span class="icon">📂</span> Repositories</a>
+            <a href="/api/search" class="quick-link"><span class="icon">🔎</span> Search API</a>
+            <a href="/api/jobs" class="quick-link"><span class="icon">📋</span> Pipeline Jobs</a>
+            <a href="/api/scheduler" class="quick-link"><span class="icon">⏰</span> Cron Schedule</a>
+            <a href="/health/live" class="quick-link"><span class="icon">💚</span> Liveness</a>
+            <a href="/health/ready" class="quick-link"><span class="icon">✅</span> Readiness</a>
+            <a href="/metrics" class="quick-link"><span class="icon">📊</span> Prometheus</a>
+            <a href="/api/docs" class="quick-link" target="_blank"><span class="icon">📖</span> OpenAPI Docs</a>
+        </div>
+
+        <!-- Overview Stats -->
+        <div id="overview" class="section-title">📊 System Overview</div>
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-label">Repositories</div>
+                <div class="stat-value" id="stat-repos" style="color: var(--accent-blue);">-</div>
+                <div class="stat-change stat-up">indexed</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Symbols</div>
+                <div class="stat-value" id="stat-symbols" style="color: var(--accent-purple);">-</div>
+                <div class="stat-change">functions + classes</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Graph Edges</div>
+                <div class="stat-value" id="stat-edges" style="color: var(--accent-cyan);">-</div>
+                <div class="stat-change">call + import edges</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Vectors</div>
+                <div class="stat-value" id="stat-vectors" style="color: var(--accent-green);">-</div>
+                <div class="stat-change">embedded chunks</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Tokens Saved</div>
+                <div class="stat-value" id="stat-tokens-saved" style="color: var(--accent-amber);">-</div>
+                <div class="stat-change stat-up" id="stat-reduction">vs raw reads</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Uptime</div>
+                <div class="stat-value" id="stat-uptime" style="color: var(--text-secondary);">-</div>
+                <div class="stat-change">seconds</div>
+            </div>
+        </div>
+
+        <!-- Panels -->
+        <div class="panel-grid">
+            <!-- Pipeline Status Panel -->
+            <div class="panel" id="pipeline">
+                <div class="panel-header">
+                    <div class="panel-title">🚀 Pipeline Status</div>
+                    <span class="panel-badge" id="pipeline-status">idle</span>
+                </div>
+                <div class="panel-body">
+                    <table class="data-table">
+                        <thead><tr><th>Phase</th><th>Duration</th><th>Items</th><th>Status</th></tr></thead>
+                        <tbody id="pipeline-phases">
+                            <tr><td>detect</td><td>-</td><td>-</td><td><span class="tag tag-info">pending</span></td></tr>
+                            <tr><td>parse</td><td>-</td><td>-</td><td><span class="tag tag-info">pending</span></td></tr>
+                            <tr><td>chunk</td><td>-</td><td>-</td><td><span class="tag tag-info">pending</span></td></tr>
+                            <tr><td>resolve</td><td>-</td><td>-</td><td><span class="tag tag-info">pending</span></td></tr>
+                            <tr><td>embed</td><td>-</td><td>-</td><td><span class="tag tag-info">pending</span></td></tr>
+                            <tr><td>store</td><td>-</td><td>-</td><td><span class="tag tag-info">pending</span></td></tr>
+                            <tr><td>analyze</td><td>-</td><td>-</td><td><span class="tag tag-info">pending</span></td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- MCP Server Panel -->
+            <div class="panel" id="mcp">
+                <div class="panel-header">
+                    <div class="panel-title">🤖 MCP Server Performance</div>
+                    <span class="panel-badge">10 tools</span>
+                </div>
+                <div class="panel-body">
+                    <table class="data-table">
+                        <thead><tr><th>Tool</th><th>Calls</th><th>p95 Latency</th><th>Errors</th></tr></thead>
+                        <tbody id="mcp-tools">
+                            <tr><td>search_semantic</td><td>-</td><td>-</td><td>-</td></tr>
+                            <tr><td>get_context</td><td>-</td><td>-</td><td>-</td></tr>
+                            <tr><td>find_callers</td><td>-</td><td>-</td><td>-</td></tr>
+                            <tr><td>find_callees</td><td>-</td><td>-</td><td>-</td></tr>
+                            <tr><td>query_graph</td><td>-</td><td>-</td><td>-</td></tr>
+                            <tr><td>recent_changes</td><td>-</td><td>-</td><td>-</td></tr>
+                            <tr><td>get_architecture</td><td>-</td><td>-</td><td>-</td></tr>
+                            <tr><td>search_symbols</td><td>-</td><td>-</td><td>-</td></tr>
+                            <tr><td>get_health</td><td>-</td><td>-</td><td>-</td></tr>
+                            <tr><td>list_repos</td><td>-</td><td>-</td><td>-</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Search & RAG Panel -->
+            <div class="panel" id="search">
+                <div class="panel-header">
+                    <div class="panel-title">🔎 Search & RAG Quality</div>
+                    <span class="panel-badge">hybrid</span>
+                </div>
+                <div class="panel-body">
+                    <div style="margin-bottom: 1rem;">
+                        <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
+                            <span style="font-size: 0.8rem; color: var(--text-muted);">BM25 Contribution</span>
+                            <span style="font-size: 0.8rem; color: var(--accent-blue);" id="bm25-pct">50%</span>
+                        </div>
+                        <div class="progress-bar"><div class="progress-fill" style="width: 50%; background: var(--gradient-blue);" id="bm25-bar"></div></div>
+                    </div>
+                    <div style="margin-bottom: 1rem;">
+                        <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
+                            <span style="font-size: 0.8rem; color: var(--text-muted);">Vector Contribution</span>
+                            <span style="font-size: 0.8rem; color: var(--accent-purple);" id="vector-pct">50%</span>
+                        </div>
+                        <div class="progress-bar"><div class="progress-fill" style="width: 50%; background: var(--gradient-purple);" id="vector-bar"></div></div>
+                    </div>
+                    <table class="data-table">
+                        <thead><tr><th>Metric</th><th>Value</th></tr></thead>
+                        <tbody>
+                            <tr><td>Total Queries</td><td id="search-total">-</td></tr>
+                            <tr><td>Avg Latency</td><td id="search-latency">-</td></tr>
+                            <tr><td>Avg Results/Query</td><td id="search-results">-</td></tr>
+                            <tr><td>Hit Rate</td><td id="search-hit-rate">-</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Token Savings Panel -->
+            <div class="panel" id="tokens">
+                <div class="panel-header">
+                    <div class="panel-title">💰 Token Savings</div>
+                    <span class="panel-badge" id="token-reduction-badge">-</span>
+                </div>
+                <div class="panel-body">
+                    <div style="text-align: center; margin-bottom: 1.5rem;">
+                        <div style="font-size: 3rem; font-weight: 800; background: var(--gradient-green); -webkit-background-clip: text; -webkit-text-fill-color: transparent;" id="token-pct">-</div>
+                        <div style="color: var(--text-muted); font-size: 0.85rem;">average token reduction</div>
+                    </div>
+                    <table class="data-table">
+                        <thead><tr><th>Metric</th><th>Value</th></tr></thead>
+                        <tbody>
+                            <tr><td>Raw Tokens (without RepoLens)</td><td id="tokens-raw">-</td></tr>
+                            <tr><td>Distilled Tokens (with RepoLens)</td><td id="tokens-distilled">-</td></tr>
+                            <tr><td>Total Tokens Saved</td><td id="tokens-total-saved" style="color: var(--accent-green); font-weight: 700;">-</td></tr>
+                            <tr><td>Avg Budget Utilization</td><td id="tokens-budget">-</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Cron Schedule Panel -->
+            <div class="panel">
+                <div class="panel-header">
+                    <div class="panel-title">⏰ Cron Schedule</div>
+                    <span class="panel-badge">active</span>
+                </div>
+                <div class="panel-body">
+                    <table class="data-table">
+                        <thead><tr><th>Job</th><th>Schedule</th><th>Last Run</th><th>Next Run</th><th>Status</th></tr></thead>
+                        <tbody id="cron-jobs">
+                            <tr><td>Incremental Index</td><td><code>*/15 * * * *</code></td><td>-</td><td>-</td><td><span class="tag tag-success">active</span></td></tr>
+                            <tr><td>Full Re-index</td><td><code>0 2 * * *</code></td><td>-</td><td>-</td><td><span class="tag tag-success">active</span></td></tr>
+                            <tr><td>Staleness Check</td><td><code>*/30 * * * *</code></td><td>-</td><td>-</td><td><span class="tag tag-success">active</span></td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Repository Management Panel -->
+            <div class="panel" id="repos" style="grid-column: 1 / -1;">
+                <div class="panel-header">
+                    <div class="panel-title">📂 Repository Management</div>
+                    <span class="panel-badge" id="repos-count">0 repos</span>
+                </div>
+                <div class="panel-body">
+                    <!-- Add Repository Form -->
+                    <div style="display: flex; gap: 0.75rem; margin-bottom: 1.5rem; flex-wrap: wrap;">
+                        <input type="text" id="repo-path-input" placeholder="Local path (e.g. C:\projects\myapp)"
+                            style="flex: 1; min-width: 250px; padding: 0.6rem 1rem; background: var(--bg-primary); border: 1px solid var(--border); border-radius: 0.5rem; color: var(--text-primary); font-size: 0.9rem; outline: none; transition: border 0.2s;"
+                            onfocus="this.style.borderColor='var(--accent-blue)'" onblur="this.style.borderColor='var(--border)'" />
+                        <input type="text" id="repo-name-input" placeholder="Display name (optional)"
+                            style="width: 180px; padding: 0.6rem 1rem; background: var(--bg-primary); border: 1px solid var(--border); border-radius: 0.5rem; color: var(--text-primary); font-size: 0.9rem; outline: none; transition: border 0.2s;"
+                            onfocus="this.style.borderColor='var(--accent-blue)'" onblur="this.style.borderColor='var(--border)'" />
+                        <button onclick="addRepo()" id="add-repo-btn"
+                            style="padding: 0.6rem 1.5rem; background: var(--gradient-blue); color: white; border: none; border-radius: 0.5rem; cursor: pointer; font-weight: 600; font-size: 0.9rem; transition: opacity 0.2s, transform 0.1s;"
+                            onmouseenter="this.style.opacity='0.9'" onmouseleave="this.style.opacity='1'" onmousedown="this.style.transform='scale(0.97)'" onmouseup="this.style.transform='scale(1)'">
+                            + Add Repository
+                        </button>
+                    </div>
+                    <!-- Status Message -->
+                    <div id="repo-message" style="display: none; padding: 0.6rem 1rem; border-radius: 0.5rem; margin-bottom: 1rem; font-size: 0.85rem;"></div>
+                    <!-- Repository List -->
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>Name</th>
+                                <th>Path</th>
+                                <th>Files</th>
+                                <th>Status</th>
+                                <th>Last Indexed</th>
+                                <th style="text-align: right;">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="repos-list">
+                            <tr id="repos-empty">
+                                <td colspan="6" style="text-align: center; color: var(--text-muted); padding: 2rem;">
+                                    No repositories added yet. Enter a local path above to get started.
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Event Log Panel -->
+            <div class="panel">
+                <div class="panel-header">
+                    <div class="panel-title">📜 Recent Events</div>
+                    <span class="panel-badge" id="event-count">0</span>
+                </div>
+                <div class="panel-body">
+                    <div class="event-log" id="event-log">
+                        <div class="event-item">
+                            <span class="event-time">--:--:--</span>
+                            <span class="event-msg">Waiting for events...</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- Auto-refresh indicator -->
+    <div class="refresh-indicator">
+        <span class="status-dot" style="width: 6px; height: 6px; color: var(--accent-green);"></span>
+        <span>Auto-refresh: <span id="refresh-countdown">30</span>s</span>
+    </div>
+
+    <script>
+        let countdown = 30;
+        const countdownEl = document.getElementById('refresh-countdown');
+
+        async function fetchDashboardData() {
+            try {
+                const resp = await fetch('/api/dashboard/data');
+                if (!resp.ok) return;
+                const data = await resp.json();
+                updateDashboard(data);
+            } catch (e) {
+                console.warn('Dashboard fetch failed:', e);
+            }
+        }
+
+        function updateDashboard(data) {
+            // Update health status
+            const health = data.health;
+            if (health) {
+                const readiness = health.readiness;
+                const statusEl = document.getElementById('system-status');
+                statusEl.textContent = readiness?.status === 'healthy' ? 'Operational' : 'Degraded';
+
+                const uptimeEl = document.getElementById('stat-uptime');
+                if (readiness?.uptime_seconds) {
+                    uptimeEl.textContent = formatDuration(readiness.uptime_seconds);
+                }
+            }
+
+            // Update events
+            if (data.metrics?.recent_events) {
+                const logEl = document.getElementById('event-log');
+                const events = data.metrics.recent_events;
+                document.getElementById('event-count').textContent = events.length;
+                if (events.length > 0) {
+                    logEl.innerHTML = events.reverse().map(e => `
+                        <div class="event-item">
+                            <span class="event-time">${new Date(e.timestamp * 1000).toLocaleTimeString()}</span>
+                            <span class="event-msg">${e.type}: ${e.tool_name || ''} ${e.status || ''} ${e.duration_ms ? Math.round(e.duration_ms) + 'ms' : ''}</span>
+                        </div>
+                    `).join('');
+                }
+            }
+        }
+
+        function formatDuration(seconds) {
+            if (seconds < 60) return Math.round(seconds) + 's';
+            if (seconds < 3600) return Math.round(seconds / 60) + 'm';
+            return Math.round(seconds / 3600) + 'h';
+        }
+
+        // Auto-refresh every 30 seconds
+        setInterval(() => {
+            countdown--;
+            if (countdown <= 0) {
+                countdown = 30;
+                fetchDashboardData();
+            }
+            countdownEl.textContent = countdown;
+        }, 1000);
+
+        // Initial fetch
+        fetchDashboardData();
+
+        // Navigation smooth scroll
+        document.querySelectorAll('.nav a[href^="#"]').forEach(a => {
+            a.addEventListener('click', (e) => {
+                e.preventDefault();
+                document.querySelectorAll('.nav a').forEach(n => n.classList.remove('active'));
+                a.classList.add('active');
+                const target = document.querySelector(a.getAttribute('href'));
+                if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            });
+        });
+
+        // ── Repository Management ─────────────────────────────────────
+        const btnStyle = `padding: 0.3rem 0.7rem; border: none; border-radius: 0.4rem; cursor: pointer; font-size: 0.75rem; font-weight: 600; transition: opacity 0.2s;`;
+
+        function showMessage(msg, type = 'success') {
+            const el = document.getElementById('repo-message');
+            el.style.display = 'block';
+            el.textContent = msg;
+            el.style.background = type === 'success' ? 'rgba(16,185,129,0.15)' : type === 'error' ? 'rgba(239,68,68,0.15)' : 'rgba(59,130,246,0.15)';
+            el.style.color = type === 'success' ? 'var(--accent-green)' : type === 'error' ? 'var(--accent-red)' : 'var(--accent-blue)';
+            el.style.border = `1px solid ${type === 'success' ? 'var(--accent-green)' : type === 'error' ? 'var(--accent-red)' : 'var(--accent-blue)'}`;
+            setTimeout(() => { el.style.display = 'none'; }, 5000);
+        }
+
+        async function addRepo() {
+            const pathInput = document.getElementById('repo-path-input');
+            const nameInput = document.getElementById('repo-name-input');
+            const btn = document.getElementById('add-repo-btn');
+            const localPath = pathInput.value.trim();
+
+            if (!localPath) {
+                showMessage('Please enter a local repository path', 'error');
+                pathInput.focus();
+                return;
+            }
+
+            btn.textContent = 'Adding...';
+            btn.disabled = true;
+
+            try {
+                const body = { local_path: localPath };
+                if (nameInput.value.trim()) body.name = nameInput.value.trim();
+
+                const resp = await fetch('/api/repos', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body),
+                });
+
+                if (!resp.ok) {
+                    const err = await resp.json();
+                    throw new Error(err.detail || 'Failed to add repository');
+                }
+
+                const data = await resp.json();
+                showMessage(`Repository "${data.name}" added (${data.files_count} files)`);
+                pathInput.value = '';
+                nameInput.value = '';
+                await refreshRepos();
+            } catch (e) {
+                showMessage(e.message, 'error');
+            } finally {
+                btn.textContent = '+ Add Repository';
+                btn.disabled = false;
+            }
+        }
+
+        async function triggerIndex(repoId, repoName, mode = 'incremental') {
+            try {
+                showMessage(`Starting ${mode} index for "${repoName}"...`, 'info');
+                const resp = await fetch(`/api/repos/${repoId}/index?mode=${mode}`, { method: 'POST' });
+                if (!resp.ok) {
+                    const err = await resp.json();
+                    throw new Error(err.detail || 'Failed to start indexing');
+                }
+                showMessage(`Pipeline started for "${repoName}" (${mode})`);
+                // Start polling for progress
+                pollPipeline(repoId);
+                await refreshRepos();
+            } catch (e) {
+                showMessage(e.message, 'error');
+            }
+        }
+
+        async function stopPipeline(repoId, repoName) {
+            try {
+                const resp = await fetch(`/api/repos/${repoId}/stop`, { method: 'POST' });
+                if (!resp.ok) {
+                    const err = await resp.json();
+                    throw new Error(err.detail || 'Failed to stop pipeline');
+                }
+                showMessage(`Pipeline stopped for "${repoName}"`);
+                await refreshRepos();
+            } catch (e) {
+                showMessage(e.message, 'error');
+            }
+        }
+
+        async function removeRepo(repoId, repoName) {
+            if (!confirm(`Remove "${repoName}" from RepoLens?`)) return;
+            try {
+                const resp = await fetch(`/api/repos/${repoId}`, { method: 'DELETE' });
+                if (!resp.ok) throw new Error('Failed to remove');
+                showMessage(`Repository "${repoName}" removed`);
+                await refreshRepos();
+            } catch (e) {
+                showMessage(e.message, 'error');
+            }
+        }
+
+        function pollPipeline(repoId) {
+            const interval = setInterval(async () => {
+                try {
+                    const resp = await fetch(`/api/repos/${repoId}/pipeline`);
+                    if (!resp.ok) { clearInterval(interval); return; }
+                    const data = await resp.json();
+                    if (!data.running && data.status !== 'running') {
+                        clearInterval(interval);
+                        await refreshRepos();
+                    } else {
+                        await refreshRepos();
+                    }
+                } catch (e) {
+                    clearInterval(interval);
+                }
+            }, 2000);
+        }
+
+        function statusTag(status) {
+            const colors = {
+                registered: 'tag-info',
+                indexing: 'tag-warning',
+                indexed: 'tag-success',
+                error: 'tag-error',
+                cancelled: 'tag-error',
+            };
+            const key = Object.keys(colors).find(k => status.startsWith(k)) || 'registered';
+            return `<span class="tag ${colors[key]}">${status}</span>`;
+        }
+
+        async function refreshRepos() {
+            try {
+                const resp = await fetch('/api/repos');
+                if (!resp.ok) return;
+                const repos = await resp.json();
+
+                const tbody = document.getElementById('repos-list');
+                const countEl = document.getElementById('repos-count');
+                countEl.textContent = `${repos.length} repo${repos.length !== 1 ? 's' : ''}`;
+
+                // Update stats
+                document.getElementById('stat-repos').textContent = repos.length;
+
+                if (repos.length === 0) {
+                    tbody.innerHTML = `<tr id="repos-empty"><td colspan="6" style="text-align: center; color: var(--text-muted); padding: 2rem;">No repositories added yet. Enter a local path above to get started.</td></tr>`;
+                    return;
+                }
+
+                tbody.innerHTML = repos.map(r => {
+                    const isIndexing = r.status.startsWith('indexing');
+                    const lastIndexed = r.last_indexed ? new Date(r.last_indexed * 1000).toLocaleString() : '-';
+                    const shortPath = r.local_path.length > 45 ? '...' + r.local_path.slice(-42) : r.local_path;
+
+                    const actions = isIndexing
+                        ? `<button onclick="stopPipeline('${r.id}','${r.name}')" style="${btnStyle} background: var(--accent-red); color: white;">■ Stop</button>`
+                        : `<button onclick="triggerIndex('${r.id}','${r.name}','incremental')" style="${btnStyle} background: var(--accent-green); color: white;">▶ Index</button>
+                           <button onclick="triggerIndex('${r.id}','${r.name}','full')" style="${btnStyle} background: var(--accent-amber); color: #111;" title="Full re-index">⟳ Full</button>
+                           <button onclick="removeRepo('${r.id}','${r.name}')" style="${btnStyle} background: rgba(239,68,68,0.15); color: var(--accent-red);" title="Remove">✕</button>`;
+
+                    return `<tr>
+                        <td style="font-weight: 600;">${r.name}</td>
+                        <td style="font-family: monospace; font-size: 0.8rem; color: var(--text-secondary);" title="${r.local_path}">${shortPath}</td>
+                        <td>${r.files_count.toLocaleString()}</td>
+                        <td>${statusTag(r.status)}</td>
+                        <td style="font-size: 0.8rem;">${lastIndexed}</td>
+                        <td style="text-align: right; white-space: nowrap;">${actions}</td>
+                    </tr>`;
+                }).join('');
+
+            } catch (e) {
+                console.warn('Failed to refresh repos:', e);
+            }
+        }
+
+        // Handle Enter key in path input
+        document.getElementById('repo-path-input').addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') addRepo();
+        });
+
+        // Initial repos load
+        refreshRepos();
+    </script>
+</body>
+</html>

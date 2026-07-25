@@ -1,0 +1,36 @@
+Metadata-Version: 2.4
+Name: repolens
+Version: 0.1.0
+Requires-Python: >=3.11
+Requires-Dist: tree-sitter<1,>=0.23
+Requires-Dist: tree-sitter-language-pack<1,>=0.3
+Requires-Dist: networkx<4,>=3.3
+Requires-Dist: sqlalchemy[asyncio]<3,>=2.0
+Requires-Dist: aiosqlite<1,>=0.20
+Requires-Dist: lancedb<1,>=0.12
+Requires-Dist: fastapi<1,>=0.115
+Requires-Dist: uvicorn[standard]<1,>=0.32
+Requires-Dist: mcp<2,>=1.0
+Requires-Dist: fastmcp<4,>=3.2
+Requires-Dist: apscheduler<4,>=3.10
+Requires-Dist: watchdog<7,>=4
+Requires-Dist: structlog<25,>=24
+Requires-Dist: click<9,>=8.1
+Requires-Dist: rich<14,>=13
+Requires-Dist: pydantic<3,>=2.8
+Requires-Dist: httpx<1,>=0.27
+Requires-Dist: gitpython<4,>=3.1
+Requires-Dist: jinja2<4,>=3.1
+Requires-Dist: pathspec<1,>=0.12
+Requires-Dist: tenacity<10,>=9
+Requires-Dist: pyyaml<7,>=6.0
+Requires-Dist: scipy<2,>=1.11
+Provides-Extra: postgres
+Requires-Dist: pgvector>=0.3; extra == "postgres"
+Requires-Dist: asyncpg>=0.29; extra == "postgres"
+Provides-Extra: communities
+Requires-Dist: graspologic>=3.4; extra == "communities"
+Provides-Extra: embeddings
+Requires-Dist: sentence-transformers>=3.0; extra == "embeddings"
+Provides-Extra: metrics
+Requires-Dist: prometheus-client>=0.20; extra == "metrics"
