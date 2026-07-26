@@ -75,6 +75,7 @@ src/repolens/server/mcp/server.py
 src/repolens/server/mcp/tool_architecture.py
 src/repolens/server/mcp/tool_changes.py
 src/repolens/server/mcp/tool_context.py
+src/repolens/server/mcp/tool_files.py
 src/repolens/server/mcp/tool_graph.py
 src/repolens/server/mcp/tool_health.py
 src/repolens/server/mcp/tool_indexing.py
