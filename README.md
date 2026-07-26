@@ -181,6 +181,10 @@ python -m pip install -e .
 python -m repolens serve
 ```
 
+The MCP server now includes repository intelligence tools plus basic workspace file operations
+such as listing, reading, writing, moving, and deleting files and folders. See
+[MCP and REST API](docs/mcp-api.md) for the full tool list and the HTTP bridge.
+
 All clients must use the same `REPOLENS_DATA_DIR` as the Web server so they can find its persistent
 repository registry. In the examples below, replace both absolute paths with paths on your
 machine:
