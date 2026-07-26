@@ -68,6 +68,20 @@ public goal—not a claim about current growth.
 
 ## Quick start
 
+The bootstrap, IPC, and installer lifecycle is complete:
+
+```bash
+repolens init
+repolens daemon
+repolens dashboard
+repolens mcp-config codex
+repolens diagnostics
+```
+
+Initialization is atomic and user-scoped. A cross-platform lock and ZeroMQ
+health endpoint enforce one daemon per user. MCP snippets use the actual
+installation path and are never written to client configuration automatically.
+
 Prerequisites: Python 3.11+ and Git.
 
 ```bash
@@ -82,7 +96,7 @@ python -m pip install -e .
 repolens serve
 ```
 
-Open [http://127.0.0.1:8420/dashboard](http://127.0.0.1:8420/dashboard), add a local repository,
+Open [http://127.0.0.1:38451/dashboard](http://127.0.0.1:38451/dashboard), add a local repository,
 and choose **Full index**. A successful run reports the real number of files, symbols, and edges
 written to `<repository>/.repolens/index.db`; zero-output parsing is treated as a failure.
 
@@ -262,7 +276,7 @@ are stored in `REPOLENS_DATA_DIR`, so another RepoLens process can recover due o
 after restart.
 
 You can test the same tools without an MCP client from the local
-[OpenAPI page](http://127.0.0.1:8420/api/docs) using `GET /api/mcp/tools` and
+[OpenAPI page](http://127.0.0.1:38451/api/docs) using `GET /api/mcp/tools` and
 `POST /api/mcp/call`.
 
 The MCP surface includes hybrid search, symbol search, budgeted context assembly, callers/callees,

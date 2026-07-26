@@ -209,3 +209,15 @@ pip install filelock
 - **Fallback transport:** On Windows, if IPC sockets are inconvenient, use `tcp://127.0.0.1:<port>` with the exact same ZeroMQ API.
 
 This combination gives you a clean, OS-independent solution with minimal platform-specific code while remaining fast enough to serve many concurrent semantic search requests.
+
+---
+
+# Implementation Status (Completed 2026-07-26)
+
+Implemented in `src/repolens/runtime/ipc.py` and `daemon.py`. ZeroMQ REQ/REP
+uses loopback TCP on Windows and a runtime-scoped IPC socket on Linux/macOS.
+Endpoint discovery lives in `ipc/metadata.json`; `filelock` supplies
+non-blocking leader election. Finite socket timeouts, zero linger, IPC-first
+startup, PID cleanup, and the `ping` health request cover crash recovery and
+concurrent starts. Real request/reply behavior is tested in
+`tests/test_runtime.py`.

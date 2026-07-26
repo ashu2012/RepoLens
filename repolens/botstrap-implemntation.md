@@ -677,3 +677,16 @@ Actions:
 - Recoverable after crashes.
 - Safe for concurrent startup.
 - Future-proof for plugins and additional runtime services.
+
+---
+
+# Implementation Status (Completed 2026-07-26)
+
+Implemented in `src/repolens/runtime/`: platform detection, recommended paths,
+installation detection, writable-space validation, atomic configuration,
+the complete runtime tree, logs, IPC metadata, lock/PID lifecycle, and daemon
+launch. `repolens init` uses recommended defaults, `--wizard` exposes all
+documented choices, and `repolens reset` supports repository preservation.
+
+Validation: the complete suite reports `49 passed`, including bootstrap
+idempotency and CLI init/reset coverage.

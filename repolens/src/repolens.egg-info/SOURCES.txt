@@ -37,6 +37,7 @@ src/repolens/core/pipeline/checkpoint.py
 src/repolens/core/pipeline/incremental.py
 src/repolens/core/pipeline/orchestrator.py
 src/repolens/core/pipeline/progress.py
+src/repolens/core/pipeline/service.py
 src/repolens/core/providers/__init__.py
 src/repolens/core/providers/base.py
 src/repolens/core/providers/ollama.py
@@ -55,11 +56,16 @@ src/repolens/observability/metrics.py
 src/repolens/observability/pipeline_monitor.py
 src/repolens/observability/rag_monitor.py
 src/repolens/observability/token_tracker.py
+src/repolens/runtime/__init__.py
+src/repolens/runtime/bootstrap.py
+src/repolens/runtime/daemon.py
+src/repolens/runtime/ipc.py
 src/repolens/server/__init__.py
 src/repolens/server/app.py
 src/repolens/server/scheduler.py
 src/repolens/server/api/__init__.py
 src/repolens/server/api/jobs.py
+src/repolens/server/api/mcp.py
 src/repolens/server/api/repos.py
 src/repolens/server/api/search.py
 src/repolens/server/installer/__init__.py
@@ -70,6 +76,8 @@ src/repolens/server/mcp/tool_changes.py
 src/repolens/server/mcp/tool_context.py
 src/repolens/server/mcp/tool_graph.py
 src/repolens/server/mcp/tool_health.py
+src/repolens/server/mcp/tool_indexing.py
 src/repolens/server/mcp/tool_search.py
 tests/test_core.py
 tests/test_integration_index.py
+tests/test_mcp_runtime.py

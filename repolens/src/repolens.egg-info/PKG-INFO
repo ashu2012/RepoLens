@@ -11,7 +11,7 @@ Requires-Dist: lancedb<1,>=0.12
 Requires-Dist: fastapi<1,>=0.115
 Requires-Dist: uvicorn[standard]<1,>=0.32
 Requires-Dist: mcp<2,>=1.0
-Requires-Dist: fastmcp<4,>=3.2
+Requires-Dist: fastmcp<4,>=3.4
 Requires-Dist: apscheduler<4,>=3.10
 Requires-Dist: watchdog<7,>=4
 Requires-Dist: structlog<25,>=24
@@ -25,6 +25,8 @@ Requires-Dist: pathspec<1,>=0.12
 Requires-Dist: tenacity<10,>=9
 Requires-Dist: pyyaml<7,>=6.0
 Requires-Dist: scipy<2,>=1.11
+Requires-Dist: filelock<4,>=3.15
+Requires-Dist: pyzmq<28,>=26
 Provides-Extra: postgres
 Requires-Dist: pgvector>=0.3; extra == "postgres"
 Requires-Dist: asyncpg>=0.29; extra == "postgres"

@@ -1,260 +1,236 @@
-"""RepoLens CLI — Command-line interface for code intelligence.
-
-Provides commands for repository management, indexing, search, and server control.
-"""
+"""RepoLens command-line interface."""
 
 from __future__ import annotations
 
 import asyncio
+import json
 import os
+import shutil
+import subprocess
 import sys
+import time
+import uuid
+import webbrowser
 from pathlib import Path
-
-# Force UTF-8 output on Windows to avoid cp1252 encoding errors with Rich
-if sys.platform == "win32":
-    os.environ.setdefault("PYTHONIOENCODING", "utf-8")
-    try:
-        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
-    except (AttributeError, OSError):
-        pass
 
 import click
 from rich.console import Console
-from rich.table import Table
 from rich.panel import Panel
-from rich import print as rprint
 
-console = Console(force_terminal=True)
+console = Console()
 
 
 @click.group()
 @click.version_option(package_name="repolens")
-def cli():
-    """🔍 RepoLens — Local Code Intelligence Platform
-
-    Semantic search, knowledge graphs, and context distillation
-    for AI coding agents. Powered by Tree-sitter + FastMCP.
-    """
-    pass
-
-
-@cli.command()
-@click.argument("path", type=click.Path(exists=True), default=".")
-@click.option("--name", "-n", help="Repository display name (default: directory name)")
-def init(path: str, name: str | None):
-    """Initialize RepoLens in a repository.
-
-    Creates .repolens/ directory and config files. Optionally adds
-    the repository to the index.
-    """
-    repo_path = Path(path).resolve()
-    repolens_dir = repo_path / ".repolens"
-    repolens_dir.mkdir(exist_ok=True)
-
-    display_name = name or repo_path.name
-    console.print(f"\n[bold green]✓[/] Initialized RepoLens for [bold]{display_name}[/]")
-    console.print(f"  Directory: {repolens_dir}")
-    console.print(f"\n  Run [bold cyan]repolens add {repo_path}[/] to register this repo")
-    console.print(f"  Run [bold cyan]repolens index {repo_path}[/] to build the index")
-
-
-@cli.command()
-@click.argument("path", type=click.Path(exists=True))
-@click.option("--name", "-n", help="Repository display name")
-def add(path: str, name: str | None):
-    """Register a local repository for indexing."""
-    repo_path = Path(path).resolve()
-    display_name = name or repo_path.name
-
-    # Verify it's a git repo
-    if not (repo_path / ".git").exists():
-        console.print(f"[yellow]⚠[/] {repo_path} is not a git repository. Indexing may be limited.")
-
-    console.print(f"[bold green]✓[/] Added repository: [bold]{display_name}[/]")
-    console.print(f"  Path: {repo_path}")
-    console.print(f"\n  Run [bold cyan]repolens index {repo_path}[/] to build the index")
+def cli() -> None:
+    """RepoLens local code intelligence platform."""
 
 
 @cli.command()
 @click.argument("path", type=click.Path(exists=True), required=False)
-@click.option("--full", is_flag=True, help="Force full re-index (default: incremental)")
-@click.option("--parallel", "-j", type=int, default=4, help="Parallel workers for parsing")
-def index(path: str | None, full: bool, parallel: int):
-    """Run the indexing pipeline on a repository.
+@click.option("--name", "-n")
+@click.option("--wizard", is_flag=True, help="Interactively customize the user runtime")
+@click.option("--runtime-dir", type=click.Path(file_okay=False))
+@click.option("--no-auto-start", is_flag=True)
+@click.option("--force", is_flag=True, help="Regenerate runtime configuration")
+def init(path: str | None, name: str | None, wizard: bool, runtime_dir: str | None,
+         no_auto_start: bool, force: bool) -> None:
+    """Initialize the user runtime, and optionally a repository."""
+    from repolens.runtime.bootstrap import BootstrapOptions, RepoLensBootstrap, RuntimeLocator
 
-    If no path is given, indexes all registered repositories.
-    """
-    from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TimeElapsedColumn
+    selected = Path(runtime_dir).expanduser() if runtime_dir else RuntimeLocator.default_runtime()
+    auto_start, cache_size, cpu, telemetry = not no_auto_start, 5, "high", False
+    if wizard:
+        console.print(Panel.fit("RepoLens runs a local background daemon and dashboard.",
+                                title="Welcome to RepoLens"))
+        if not click.confirm(f"Use recommended runtime directory?\n{selected}", default=True):
+            selected = Path(click.prompt("Runtime directory", type=click.Path(file_okay=False)))
+        auto_start = click.confirm("Start RepoLens when you log in?", default=True)
+        cache_size = click.prompt("Maximum cache size (GB, 0 for unlimited)", default=5, type=int)
+        cpu = click.prompt("CPU profile", default="high",
+                           type=click.Choice(["low", "medium", "high"]))
+        telemetry = click.confirm("Enable anonymous crash reports?", default=False)
+    runtime = RepoLensBootstrap(selected).initialize(
+        BootstrapOptions(selected, auto_start, cache_size or None, cpu, telemetry), force=force
+    )
+    console.print(f"[green]OK[/] RepoLens runtime initialized: {runtime}")
+    if path:
+        repository = Path(path).resolve()
+        (repository / ".repolens").mkdir(exist_ok=True)
+        console.print(f"[green]OK[/] Repository initialized: {name or repository.name}")
 
-    target = Path(path).resolve() if path else Path(".")
 
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[progress.description]{task.description}"),
-        BarColumn(),
-        TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
-        TimeElapsedColumn(),
-        console=console,
-    ) as progress:
-        task = progress.add_task(
-            f"[cyan]Indexing {target.name}...", total=7
-        )
+@cli.command()
+@click.argument("path", type=click.Path(exists=True))
+@click.option("--name", "-n")
+def add(path: str, name: str | None) -> None:
+    """Register a local repository."""
+    from repolens.core.persistence.registry import registry
 
-        phases = ["detect", "parse", "chunk", "resolve", "embed", "store", "analyze"]
-        for phase in phases:
-            progress.update(task, description=f"[cyan]{phase}...")
-            # Simulate phase (actual implementation calls PipelineOrchestrator)
-            import time
-            time.sleep(0.1)  # Placeholder
-            progress.advance(task)
+    repository = Path(path).resolve()
+    existing = registry.find_repo_by_path(str(repository))
+    result = existing or registry.add_repo({
+        "id": uuid.uuid4().hex[:12],
+        "name": name or repository.name,
+        "local_path": str(repository),
+        "status": "registered",
+        "files_count": 0,
+        "is_git": (repository / ".git").exists(),
+    })
+    console.print_json(json.dumps(result, default=str))
 
-    mode = "full" if full else "incremental"
-    console.print(f"\n[bold green]✓[/] Indexing complete ({mode})")
-    console.print(f"  Repository: {target.name}")
+
+@cli.command()
+@click.argument("path", type=click.Path(exists=True), required=False)
+@click.option("--full", is_flag=True)
+def index(path: str | None, full: bool) -> None:
+    """Index a repository and wait for the durable job."""
+    from repolens.core.pipeline.service import indexing_service
+
+    result = indexing_service.index_directory(Path(path or ".").resolve(),
+                                                mode="full" if full else "auto")
+    console.print(f"Job {result['job_id']} started")
+    console.print_json(json.dumps(indexing_service.wait(result["job_id"]), default=str))
 
 
 @cli.command()
 @click.argument("query")
-@click.option("--mode", "-m", type=click.Choice(["auto", "bm25", "semantic", "hybrid"]), default="auto")
-@click.option("--top-k", "-k", type=int, default=10, help="Number of results")
-@click.option("--format", "-f", "fmt", type=click.Choice(["table", "json", "plain"]), default="table")
-def search(query: str, mode: str, top_k: int, fmt: str):
-    """Search the code index.
+@click.option("--top-k", "-k", default=10, type=int)
+def search(query: str, top_k: int) -> None:
+    """Search the first registered repository."""
+    from repolens.core.persistence.registry import registry
+    from repolens.core.search.repository import RepositorySearch
 
-    Supports hybrid search (BM25 + semantic), graph-boosted reranking.
-    """
-    console.print(f"\n[bold]🔎 Searching:[/] [cyan]{query}[/]  (mode={mode}, top_k={top_k})")
-    console.print()
-
-    # Placeholder results (actual implementation uses HybridSearch)
-    table = Table(title=f"Search Results for '{query}'", show_lines=True)
-    table.add_column("#", style="dim", width=3)
-    table.add_column("Symbol", style="bold cyan")
-    table.add_column("File", style="green")
-    table.add_column("Score", justify="right", style="yellow")
-    table.add_column("Source", style="dim")
-
-    table.add_row("1", "No results yet", "Run `repolens index` first", "-", "-")
-    console.print(table)
-
-
-@cli.command()
-@click.option("--host", "-h", default="127.0.0.1", help="Server host")
-@click.option("--port", "-p", type=int, default=8420, help="Server port")
-@click.option("--mcp", is_flag=True, help="Also start MCP stdio server")
-@click.option("--no-dashboard", is_flag=True, help="Disable web dashboard")
-@click.option("--no-scheduler", is_flag=True, help="Disable cron scheduler")
-def serve(host: str, port: int, mcp: bool, no_dashboard: bool, no_scheduler: bool):
-    """Start the RepoLens server.
-
-    Launches FastAPI server with REST API, dashboard, and optional MCP.
-    """
-    panel = Panel.fit(
-        f"[bold]🔍 RepoLens Server[/]\n\n"
-        f"  API:        [cyan]http://{host}:{port}/api[/]\n"
-        f"  Dashboard:  [cyan]http://{host}:{port}/dashboard[/]\n"
-        f"  API Docs:   [cyan]http://{host}:{port}/api/docs[/]\n"
-        f"  Health:     [cyan]http://{host}:{port}/health/live[/]\n"
-        f"  Metrics:    [cyan]http://{host}:{port}/metrics[/]\n"
-        f"  MCP:        {'[green]stdio[/]' if mcp else '[dim]disabled[/]'}\n"
-        f"  Scheduler:  {'[red]disabled[/]' if no_scheduler else '[green]active[/]'}\n"
-        f"  Dashboard:  {'[red]disabled[/]' if no_dashboard else '[green]active[/]'}",
-        title="[bold green]Starting...[/]",
-        border_style="blue",
+    repositories = registry.list_repos()
+    if not repositories:
+        raise click.ClickException("No repositories registered; run repolens add PATH")
+    results = asyncio.run(
+        RepositorySearch(repositories[0]["local_path"]).search(query, top_k=top_k)
     )
-    console.print(panel)
-
-    try:
-        import uvicorn
-        uvicorn.run(
-            "repolens.server.app:create_app",
-            host=host,
-            port=port,
-            factory=True,
-            reload=False,
-            log_level="info",
-        )
-    except ImportError:
-        console.print("[red]Error:[/] uvicorn not installed. Run: pip install repolens")
-    except KeyboardInterrupt:
-        console.print("\n[yellow]Server stopped.[/]")
+    console.print_json(json.dumps(results, default=str))
 
 
 @cli.command()
-def status():
-    """Show system status and health."""
-    table = Table(title="RepoLens Status", show_lines=True)
-    table.add_column("Component", style="bold")
-    table.add_column("Status")
-    table.add_column("Details", style="dim")
-
-    # Check components
-    checks = [
-        ("Database", "[green]✓ Connected[/]", ".repolens/repolens.db"),
-        ("Vector Store", "[green]✓ Ready[/]", "LanceDB @ .repolens/vectors/"),
-        ("Graph Store", "[green]✓ Loaded[/]", "0 nodes, 0 edges"),
-        ("Embedding", "[yellow]⚠ Checking...[/]", "ollama @ localhost:11434"),
-        ("MCP Server", "[dim]○ Not running[/]", "Start with: repolens serve --mcp"),
-        ("Scheduler", "[dim]○ Not running[/]", "Start with: repolens serve"),
-        ("Dashboard", "[dim]○ Not running[/]", "http://localhost:8420/dashboard"),
-    ]
-
-    for name, status_text, detail in checks:
-        table.add_row(name, status_text, detail)
-
-    console.print(table)
+@click.option("--host", default="127.0.0.1")
+@click.option("--port", "-p", default=38451, type=int)
+def serve(host: str, port: int) -> None:
+    """Run the HTTP API and dashboard in the foreground."""
+    import uvicorn
+    console.print(f"Dashboard: http://{host}:{port}/dashboard")
+    uvicorn.run("repolens.server.app:create_app", host=host, port=port, factory=True)
 
 
 @cli.command()
-@click.option("--tree-sitter", is_flag=True, help="Install Tree-sitter language grammars")
-@click.option("--ollama", is_flag=True, help="Pull Ollama embedding model")
-@click.option("--all", "install_all", is_flag=True, help="Install all optional dependencies")
-def install(tree_sitter: bool, ollama: bool, install_all: bool):
-    """Install optional dependencies and models.
-
-    Auto-detects platform and installs Tree-sitter grammars,
-    Ollama models, and optional Python packages.
-    """
-    if install_all or tree_sitter:
-        console.print("[cyan]Installing Tree-sitter language pack...[/]")
-        console.print("[green]✓[/] Tree-sitter grammars installed (included via tree-sitter-language-pack)")
-
-    if install_all or ollama:
-        console.print("[cyan]Pulling Ollama embedding model (nomic-embed-text)...[/]")
-        import subprocess
-        try:
-            result = subprocess.run(
-                ["ollama", "pull", "nomic-embed-text"],
-                capture_output=True, text=True, timeout=300,
-            )
-            if result.returncode == 0:
-                console.print("[green]✓[/] Ollama model pulled successfully")
-            else:
-                console.print(f"[yellow]⚠[/] Ollama pull failed: {result.stderr}")
-        except FileNotFoundError:
-            console.print("[yellow]⚠[/] Ollama not found. Install from https://ollama.com")
-        except subprocess.TimeoutExpired:
-            console.print("[yellow]⚠[/] Ollama pull timed out")
-
-    if not (tree_sitter or ollama or install_all):
-        console.print("Use [bold]--all[/] to install everything, or [bold]--tree-sitter[/] / [bold]--ollama[/] individually")
+def mcp() -> None:
+    """Run the MCP stdio server."""
+    from repolens.server.mcp.server import run_stdio
+    asyncio.run(run_stdio())
 
 
 @cli.command()
-def mcp():
-    """Start MCP server on stdio transport.
+@click.option("--runtime-dir", type=click.Path(file_okay=False))
+@click.option("--foreground", is_flag=True)
+def daemon(runtime_dir: str | None, foreground: bool) -> None:
+    """Start the single-instance daemon."""
+    from repolens.runtime.bootstrap import RepoLensBootstrap
+    from repolens.runtime.daemon import run_daemon
+    from repolens.runtime.ipc import IPCClient
 
-    Use this command when configuring RepoLens as an MCP server
-    in your AI coding tool (Antigravity, Cursor, etc).
-    """
-    console.print("[bold]🤖 Starting MCP server (stdio)...[/]", err=True)
-    try:
-        from repolens.server.mcp.server import run_stdio
-        asyncio.run(run_stdio())
-    except ImportError as e:
-        console.print(f"[red]Error:[/] {e}. Run: pip install repolens", err=True)
-        sys.exit(1)
+    runtime = RepoLensBootstrap(runtime_dir).initialize()
+    if IPCClient(runtime).ping():
+        console.print("[green]RepoLens daemon is already running.[/]")
+        return
+    if foreground:
+        raise SystemExit(run_daemon(runtime))
+    subprocess.Popen(
+        [sys.executable, "-m", "repolens", "daemon", "--foreground", "--runtime-dir", str(runtime)],
+        stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        start_new_session=os.name != "nt",
+    )
+    for _ in range(40):
+        if IPCClient(runtime, timeout_ms=250).ping():
+            console.print("[green]OK[/] RepoLens daemon started.")
+            return
+        time.sleep(0.1)
+    raise click.ClickException("Daemon did not become ready; inspect logs/daemon.log")
+
+
+@cli.command()
+@click.option("--no-open", is_flag=True)
+def dashboard(no_open: bool) -> None:
+    """Open the local dashboard."""
+    url = "http://127.0.0.1:38451/dashboard"
+    console.print(url)
+    if not no_open:
+        webbrowser.open(url)
+
+
+@cli.command("mcp-config")
+@click.argument("client", type=click.Choice(
+    ["claude", "codex", "cursor", "vscode", "continue", "gemini", "windsurf"]))
+@click.option("--install-path", type=click.Path())
+@click.option("--runtime-dir", type=click.Path(file_okay=False))
+def mcp_config(client: str, install_path: str | None, runtime_dir: str | None) -> None:
+    """Print MCP configuration without modifying client files."""
+    from repolens.server.installer import generate_mcp_config
+    console.print_json(json.dumps(generate_mcp_config(client, install_path, runtime_dir)))
+
+
+@cli.command()
+@click.option("--runtime-dir", type=click.Path(file_okay=False))
+def status(runtime_dir: str | None) -> None:
+    """Show runtime and daemon status."""
+    from repolens.runtime.bootstrap import InstallationDetector, RuntimeLocator
+    from repolens.runtime.ipc import IPCClient
+
+    runtime = Path(runtime_dir) if runtime_dir else RuntimeLocator.default_runtime()
+    state = InstallationDetector(runtime).installation_state()
+    state.update(path=str(runtime), daemon=IPCClient(runtime).ping() if runtime.exists() else False)
+    console.print_json(json.dumps(state))
+
+
+@cli.command()
+@click.option("--runtime-dir", type=click.Path(file_okay=False))
+def diagnostics(runtime_dir: str | None) -> None:
+    """Run installation and dependency diagnostics."""
+    from repolens.runtime.bootstrap import InstallationDetector, RuntimeLocator
+    from repolens.runtime.ipc import IPCClient
+    from repolens.server.installer import run_diagnostics
+
+    runtime = Path(runtime_dir) if runtime_dir else RuntimeLocator.default_runtime()
+    result = run_diagnostics()
+    result["runtime"] = {
+        "path": str(runtime), **InstallationDetector(runtime).installation_state(),
+        "daemon": IPCClient(runtime).ping() if runtime.exists() else False,
+    }
+    console.print_json(json.dumps(result, default=str))
+
+
+@cli.command()
+@click.option("--runtime-dir", type=click.Path(file_okay=False))
+@click.option("--preserve-repositories", is_flag=True)
+@click.option("--yes", is_flag=True)
+def reset(runtime_dir: str | None, preserve_repositories: bool, yes: bool) -> None:
+    """Remove runtime state after confirmation."""
+    from repolens.runtime.bootstrap import RuntimeLocator
+
+    runtime = (Path(runtime_dir) if runtime_dir else RuntimeLocator.default_runtime()).resolve()
+    if not runtime.exists():
+        console.print("RepoLens is not initialized.")
+        return
+    if not yes and not click.confirm(f"Delete RepoLens runtime at {runtime}?"):
+        return
+    preserved = Path(str(runtime) + ".repositories-preserved")
+    if preserve_repositories and (runtime / "repositories").exists():
+        if preserved.exists():
+            raise click.ClickException(f"Preservation target exists: {preserved}")
+        shutil.move(runtime / "repositories", preserved)
+    shutil.rmtree(runtime)
+    if preserved.exists():
+        runtime.mkdir(parents=True)
+        shutil.move(preserved, runtime / "repositories")
+    console.print(f"[green]OK[/] Removed RepoLens runtime: {runtime}")
 
 
 if __name__ == "__main__":

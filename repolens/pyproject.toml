@@ -25,7 +25,9 @@ dependencies = [
     "pathspec>=0.12,<1",
     "tenacity>=9,<10",
     "pyyaml>=6.0,<7",
-    "scipy>=1.11,<2"
+    "scipy>=1.11,<2",
+    "filelock>=3.15,<4",
+    "pyzmq>=26,<28"
 ]
 
 [project.optional-dependencies]
@@ -44,6 +46,9 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools.packages.find]
 where = ["src"]
 include = ["repolens*"]
+
+[tool.setuptools.package-data]
+repolens = ["../templates/*.html"]
 
 [tool.ruff]
 target-version = "py311"

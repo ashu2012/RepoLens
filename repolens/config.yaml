@@ -21,7 +21,7 @@ database:
 
 server:
   host: 127.0.0.1
-  port: 8420
+  port: 38451
   mcp_transport: stdio
 
 observability:

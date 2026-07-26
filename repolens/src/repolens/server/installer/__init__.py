@@ -17,6 +17,50 @@ import structlog
 logger = structlog.get_logger(__name__)
 
 
+SUPPORTED_MCP_CLIENTS = {
+    "claude": {"label": "Claude Desktop", "config": "claude_desktop_config.json"},
+    "codex": {"label": "Codex CLI", "config": "config.toml"},
+    "cursor": {"label": "Cursor", "config": "mcp.json"},
+    "vscode": {"label": "VS Code", "config": ".vscode/mcp.json"},
+    "continue": {"label": "Continue.dev", "config": "config.yaml"},
+    "gemini": {"label": "Gemini CLI", "config": "settings.json"},
+    "windsurf": {"label": "Windsurf", "config": "mcp_config.json"},
+}
+
+
+def executable_command(install_path: str | Path | None = None) -> tuple[str, list[str]]:
+    """Return the concrete packaged executable, or the active Python fallback."""
+    if install_path:
+        candidate = Path(install_path).expanduser().resolve()
+        if candidate.is_dir():
+            candidate /= "RepoLens.exe" if os.name == "nt" else "repolens"
+        return str(candidate), ["mcp"]
+    return sys.executable, ["-m", "repolens", "mcp"]
+
+
+def generate_mcp_config(
+    client: str,
+    install_path: str | Path | None = None,
+    runtime_dir: str | Path | None = None,
+) -> dict:
+    """Generate, but never write, an MCP client configuration."""
+    if client not in SUPPORTED_MCP_CLIENTS:
+        raise ValueError(f"Unsupported MCP client: {client}")
+    from repolens.runtime.bootstrap import RuntimeLocator
+
+    command, args = executable_command(install_path)
+    runtime = str(Path(runtime_dir).expanduser().resolve()) if runtime_dir else str(
+        RuntimeLocator.default_runtime()
+    )
+    server = {
+        "type": "stdio",
+        "command": command,
+        "args": args,
+        "env": {"REPOLENS_DATA_DIR": runtime},
+    }
+    return {("servers" if client == "vscode" else "mcpServers"): {"repolens": server}}
+
+
 def detect_platform() -> dict:
     """Detect the current platform and available tools."""
     info = {

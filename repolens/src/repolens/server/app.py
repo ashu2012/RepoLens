@@ -13,7 +13,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, PlainTextResponse
 
-from .api import jobs, mcp as mcp_api, repos, search
+from .api import installer, jobs, mcp as mcp_api, repos, search
 
 logger = logging.getLogger(__name__)
 
@@ -82,6 +82,7 @@ def create_app(config: Any = None) -> FastAPI:
     app.include_router(search.router, prefix="/api/search", tags=["search"])
     app.include_router(jobs.router, prefix="/api", tags=["jobs"])
     app.include_router(mcp_api.router, prefix="/api/mcp", tags=["mcp"])
+    app.include_router(installer.router, prefix="/api/installer", tags=["installer"])
 
     # ── Dashboard ────────────────────────────────────────────────────
     try:

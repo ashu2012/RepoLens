@@ -86,6 +86,23 @@ Features that **no single reference project provides**:
 
 ## 🚀 Quick Start
 
+### Installed application lifecycle
+
+```bash
+repolens init
+repolens init --wizard
+repolens daemon
+repolens dashboard
+repolens status
+repolens diagnostics
+```
+
+Runtime state is user-scoped: `%LOCALAPPDATA%\RepoLens` on Windows,
+`~/.local/state/repolens` on Linux, and
+`~/Library/Application Support/RepoLens` on macOS. Generate client
+configuration without modifying client files with `repolens mcp-config codex`
+or any of: `claude`, `cursor`, `vscode`, `continue`, `gemini`, and `windsurf`.
+
 ```bash
 # Install
 pip install -e .
@@ -99,8 +116,8 @@ repolens index /path/to/your/repo
 
 # Start server with dashboard
 repolens serve
-# → Dashboard: http://localhost:8420/dashboard
-# → API Docs:  http://localhost:8420/api/docs
+# → Dashboard: http://localhost:38451/dashboard
+# → API Docs:  http://localhost:38451/api/docs
 
 # Or use as MCP server (for AI coding tools)
 repolens mcp
@@ -179,7 +196,7 @@ tool call. Continued activity postpones the run.
 
 ## 📊 Dashboard
 
-Access the live dashboard at `http://localhost:8420/dashboard`:
+Access the live dashboard at `http://localhost:38451/dashboard`:
 
 - **System Overview** — repos, symbols, edges, vectors, token savings
 - **Pipeline Status** — phase-level execution tracking
@@ -206,7 +223,7 @@ embedding:
 
 server:
   host: 127.0.0.1
-  port: 8420
+  port: 38451
 ```
 
 ## 🌐 Supported Languages
