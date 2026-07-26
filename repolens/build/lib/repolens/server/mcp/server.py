@@ -141,6 +141,7 @@ from . import (
     tool_graph,
     tool_health,
     tool_indexing,
+    tool_files,
     tool_search,
 )
 
