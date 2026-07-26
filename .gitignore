@@ -47,3 +47,11 @@ repolens/src/repolens/server/installer/__pycache__
 repowise/tests/fixtures/jvm_sample/.gradle/8.9/fileHashes/fileHashes.lock
 repowise/tests/fixtures/jvm_sample/.gradle/buildOutputCleanup/buildOutputCleanup.lock
 repolens/.repolens/registry.db
+repolens/.repolens/registry.db
+repolens/packaging/windows/RepoLens.iss
+repowise/tests/fixtures/jvm_sample/.gradle/file-system.probe
+repowise/tests/fixtures/jvm_sample/.gradle/8.9/executionHistory/executionHistory.lock
+repowise/tests/fixtures/jvm_sample/.gradle/8.9/fileHashes/fileHashes.bin
+repowise/tests/fixtures/jvm_sample/.gradle/8.9/fileHashes/fileHashes.lock
+repowise/tests/fixtures/jvm_sample/.gradle/9.2.0/fileHashes/fileHashes.lock
+repowise/tests/fixtures/jvm_sample/.gradle/buildOutputCleanup/buildOutputCleanup.lock
