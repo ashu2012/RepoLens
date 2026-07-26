@@ -64,6 +64,7 @@ src/repolens/server/__init__.py
 src/repolens/server/app.py
 src/repolens/server/scheduler.py
 src/repolens/server/api/__init__.py
+src/repolens/server/api/installer.py
 src/repolens/server/api/jobs.py
 src/repolens/server/api/mcp.py
 src/repolens/server/api/repos.py
@@ -81,3 +82,4 @@ src/repolens/server/mcp/tool_search.py
 tests/test_core.py
 tests/test_integration_index.py
 tests/test_mcp_runtime.py
+tests/test_runtime.py

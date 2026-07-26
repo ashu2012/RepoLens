@@ -51,6 +51,7 @@ Install Python 3.11, Git, a C compiler supported by Nuitka, and
 
 ```powershell
 cd repolens
+(Set-ExecutionPolicy -Scope Process -ExecutionPolicy RemoteSigned) ; (& t:\development\RepoLens\repolens\.venv\Scripts\Activate.ps1)
 python -m venv .venv-release
 .\.venv-release\Scripts\Activate.ps1
 python -m pip install --upgrade pip wheel
