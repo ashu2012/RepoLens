@@ -17,7 +17,7 @@
 | **🌲 AST Parsing** | Tree-sitter powered parsing for 15+ languages |
 | **🔗 Knowledge Graph** | NetworkX call/import/inheritance graph with community detection |
 | **🔎 Hybrid Search** | BM25 + vector (LanceDB) + graph-neighbor reranking |
-| **🤖 MCP Server** | 10 tools exposed via FastMCP (stdio + HTTP) |
+| **🤖 MCP Server** | 15 tools exposed via FastMCP (stdio + HTTP) |
 | **💰 Token Reduction** | 80-95% savings via skeleton generation + context distillation |
 | **⏰ Cron Indexing** | APScheduler-based incremental (*/15m) and full (daily) indexing |
 | **📊 Observability** | Prometheus metrics + self-hosted HTML dashboard |
@@ -40,7 +40,7 @@ RepoLens was designed by studying 8 leading open-source projects in the code int
 | **Knowledge Graph** | ✅ NetworkX | ✅ Dependency | ✅ AST Graph | ✅ NetworkX | ✅ OKF Concept | ❌ | ❌ | ❌ | ✅ C4 Model |
 | **Community Detection** | ✅ Leiden | ✅ Leiden | ✅ Leiden | ✅ Leiden | ❌ | ❌ | ❌ | ❌ | ❌ |
 | **Hub/Bridge Analysis** | ✅ | ❌ | ✅ | ✅ God nodes | ❌ | ❌ | ❌ | ❌ | ❌ |
-| **MCP Server** | ✅ 10 tools | ✅ 10 tools | ✅ FastMCP | ✅ Optional | ✅ | ✅ 104 tools | ❌ | ✅ Plugin | ✅ |
+| **MCP Server** | ✅ 15 tools | ✅ 10 tools | ✅ FastMCP | ✅ Optional | ✅ | ✅ 104 tools | ❌ | ✅ Plugin | ✅ |
 | **Token Reduction** | ✅ 80-95% | ✅ Up to 96% | ✅ 82x median | ✅ High | ✅ Budget | ✅ 15-95% | ❌ Tracks only | ✅ Chunked | ❌ |
 | **Skeleton Generation** | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | **Blast Radius** | ✅ 2-hop | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
@@ -155,10 +155,19 @@ Configure RepoLens as an MCP server in your AI coding tool:
 | `fetch_context` | Read files with automatic skeleton compression |
 | `find_callers` | Reverse call graph traversal |
 | `find_callees` | Forward call graph traversal |
-| `query_graph` | 15+ graph query patterns |
-| `recent_changes` | Git diff context with blast radius |
+| `query_graph` | Caller, callee, import, and containment patterns |
+| `recent_changes` | Git status or diff summary |
+| `detect_changes` | Hash-based changed-file detection |
 | `get_architecture` | Community-based architecture overview |
+| `get_communities` | Group symbols into graph communities |
 | `get_health` | Index stats, staleness, coverage |
+| `list_repos` | List repositories in the durable registry |
+| `index_current_directory` | Register the workspace and start an async index |
+| `get_index_status` | Monitor a durable asynchronous index job |
+
+Blocking MCP queries and AST indexing run in separate bounded thread pools. Every MCP session
+persists its latest activity and schedules an incremental index 10 minutes after the most recent
+tool call. Continued activity postpones the run.
 
 ## ⏰ Cron Schedule
 
@@ -217,7 +226,7 @@ repolens/
 │   │   ├── distill/      # Skeleton, context builder, token budget
 │   │   └── pipeline/     # Orchestrator, incremental, checkpoint
 │   ├── server/
-│   │   ├── mcp/          # FastMCP tools (10 tools)
+│   │   ├── mcp/          # FastMCP tools (15 tools)
 │   │   ├── api/          # REST API routes
 │   │   ├── installer/    # Auto-installer
 │   │   ├── app.py        # FastAPI factory

@@ -122,7 +122,7 @@ Kotlin, C#, PHP, Swift, Scala, and shell files through `tree-sitter-language-pac
 | Dashboard and health probes | ✅ | FastAPI dashboard plus health/metrics endpoints |
 | BM25 and vector retrieval | ✅ | Persisted chunks, offline vectors, and hybrid RRF |
 | Semantic/hybrid search API | ✅ | Repository-scoped REST search over the durable index |
-| MCP server | ✅ | Search, context, graph, change, architecture, and health tools |
+| MCP server | ✅ | Concurrent search/context tools, async indexing, durable jobs, and session reindexing |
 | Incremental indexing | ✅ | File-hash updates with added, modified, and deleted file handling |
 | Persistent repository registry/jobs | ✅ | Durable SQLite server state and job history |
 | Architecture intelligence/GraphRAG | 📋 | Planned |
@@ -246,19 +246,29 @@ start may show a trust confirmation. If tools changed after an update, run
 Ask the client:
 
 ```text
-Use RepoLens to list indexed repositories. Then search for the symbol
-"PipelineOrchestrator" and return its file path and callers.
+Use RepoLens to list indexed repositories. If this workspace is missing, call
+index_current_directory with mode "auto" and monitor get_index_status until it
+completes. Then search for "PipelineOrchestrator" and return its file path and callers.
 ```
 
-The client should invoke `list_repos`, `search_symbols`, and optionally `find_callers`. When more
-than one repository is indexed, include the returned `repo_id` in subsequent tool calls.
+The client should invoke `list_repos`, optionally `index_current_directory` and
+`get_index_status`, then `search_symbols` and optionally `find_callers`. Indexing is asynchronous:
+the initial call returns a durable job ID rather than holding the MCP request open. When more than
+one repository is indexed, include the returned `repo_id` in subsequent tool calls.
+
+RepoLens records MCP session activity and schedules an incremental index for 10 minutes after the
+most recent tool call. Continued activity moves that deadline forward. The schedule and job state
+are stored in `REPOLENS_DATA_DIR`, so another RepoLens process can recover due or abandoned work
+after restart.
 
 You can test the same tools without an MCP client from the local
 [OpenAPI page](http://127.0.0.1:8420/api/docs) using `GET /api/mcp/tools` and
 `POST /api/mcp/call`.
 
 The MCP surface includes hybrid search, symbol search, budgeted context assembly, callers/callees,
-recent changes, architecture, and health. By default RepoLens uses deterministic offline vectors.
+recent changes, architecture, health, and asynchronous workspace indexing. Blocking query work and
+AST indexing use separate bounded thread pools, keeping concurrent MCP calls responsive. By default
+RepoLens uses deterministic offline vectors.
 Set `REPOLENS_EMBEDDING_PROVIDER=ollama` to use a local semantic embedding model; see the
 [indexing guide](docs/indexing.md).
 

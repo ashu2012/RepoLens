@@ -30,6 +30,10 @@ def create_app(config: Any = None) -> FastAPI:
     async def lifespan(app: FastAPI):
         # Startup
         logger.info("RepoLens server starting up")
+        from repolens.core.pipeline.service import indexing_service
+
+        indexing_service.start_runtime()
+        app.state.indexing_service = indexing_service
 
         # Try to start the scheduler (graceful if apscheduler missing)
         try:
@@ -53,6 +57,7 @@ def create_app(config: Any = None) -> FastAPI:
                 app.state.scheduler.shutdown()
             except Exception:
                 pass
+        indexing_service.stop_runtime()
 
     app = FastAPI(
         lifespan=lifespan,

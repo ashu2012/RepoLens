@@ -28,6 +28,9 @@ class GraphStore:
         else:
             conn = sqlite3.connect(self.db_path, timeout=30)
         conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA busy_timeout=30000")
+        conn.execute("PRAGMA foreign_keys=ON")
+        conn.execute("PRAGMA synchronous=FULL")
         return conn
 
     def _init_db(self) -> None:
@@ -370,11 +373,18 @@ class GraphStore:
                     continue
                 same_file = [item for item in candidates if item["file_path"] == edge["file_path"]]
                 target = (same_file or candidates)[0]
-                conn.execute(
-                    "UPDATE edges SET target = ?, confidence = 'inferred' WHERE id = ?",
+                cursor = conn.execute(
+                    """UPDATE OR IGNORE edges
+                       SET target = ?, confidence = 'inferred'
+                       WHERE id = ?""",
                     (target["id"], edge["id"]),
                 )
-                updated += 1
+                if cursor.rowcount:
+                    updated += 1
+                else:
+                    # Multiple syntactic targets can resolve to the same symbol
+                    # and therefore represent the same durable graph edge.
+                    conn.execute("DELETE FROM edges WHERE id = ?", (edge["id"],))
         return updated
 
     def remove_file_data(self, file_path: str) -> None:

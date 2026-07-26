@@ -12,6 +12,9 @@ repowise/tests/fixtures/jvm_sample/.gradle/*
 repolens/src/repolens/*/*/*/*.*.pyc
 repolens/src/repolens/core/graph/*/*.pyc
 repolens/src/repolens/core/graph/__pycache__/store.cpython-311.pyc
+__pycache__/
+*.py[cod]
+.repolens/
 repolens/src/repolens/server/api/__pycache__/search.cpython-311.pyc
 repolens/src/repolens/server/api/__pycache__/search.cpython-313.pyc
 repolens/src/repolens/server/__pycache__/app.cpython-313.pyc

@@ -87,6 +87,56 @@ def test_registry_survives_reopen(tmp_path):
     assert reopened.get_job("job-1")["status"] == "completed"
 
 
+def test_edge_reconciliation_collapses_duplicate_resolved_calls(tmp_path):
+    import networkx as nx
+
+    from repolens.core.graph.store import GraphStore
+
+    graph = nx.DiGraph()
+    graph.add_node(
+        "caller-id",
+        name="caller",
+        qualified_name="caller",
+        kind="function",
+        file_path="service.py",
+        line_start=1,
+        line_end=3,
+        language="python",
+    )
+    graph.add_node(
+        "target-id",
+        name="normalize",
+        qualified_name="normalize",
+        kind="function",
+        file_path="helpers.py",
+        line_start=1,
+        line_end=2,
+        language="python",
+    )
+    graph.add_edge(
+        "caller-id",
+        "normalize",
+        raw_target="normalize",
+        kind="CALLS",
+        file_path="service.py",
+        line=2,
+    )
+    graph.add_edge(
+        "caller-id",
+        "helpers.normalize",
+        raw_target="helpers.normalize",
+        kind="CALLS",
+        file_path="service.py",
+        line=2,
+    )
+    store = GraphStore(tmp_path / "index.db")
+    store.save_graph(graph)
+
+    assert store.reconcile_edges() == 1
+    assert store.get_stats()["total_edges"] == 1
+    assert store.related("normalize", "in", "CALLS")[0]["name"] == "caller"
+
+
 def test_web_api_indexes_searches_and_calls_mcp(tmp_path, monkeypatch):
     import importlib
 

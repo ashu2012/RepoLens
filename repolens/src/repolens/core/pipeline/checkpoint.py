@@ -1,4 +1,6 @@
 import json
+import os
+import uuid
 from pathlib import Path
 from typing import Optional
 import structlog
@@ -20,6 +22,7 @@ class Checkpoint:
         state_dir = Path(repo_path) / ".repolens"
         state_dir.mkdir(parents=True, exist_ok=True)
         state_file = state_dir / "state.json"
+        temporary = state_dir / f".state.{uuid.uuid4().hex}.tmp"
         
         data = {
             "last_commit": self.last_commit,
@@ -29,8 +32,11 @@ class Checkpoint:
             "error": self.error
         }
         
-        with open(state_file, "w", encoding="utf-8") as f:
+        with open(temporary, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(temporary, state_file)
         logger.debug("checkpoint.saved", path=str(state_file))
 
     @classmethod

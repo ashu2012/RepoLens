@@ -3,6 +3,10 @@
 RepoLens converts supported source files into a durable SQLite index at
 `<repository>/.repolens/index.db`.
 
+Indexing is executed by a bounded worker pool. Web and MCP requests enqueue durable jobs in
+`$REPOLENS_DATA_DIR/registry.db` and return immediately. The worker owns a renewable lease while it
+runs; queued work and expired leases are recoverable after a process restart.
+
 ## Full index
 
 1. **Detect** scans the repository for supported extensions. `.git`, `.repolens`,
@@ -14,6 +18,11 @@ RepoLens converts supported source files into a durable SQLite index at
 5. **Embed** generates offline deterministic vectors by default, or Ollama vectors when enabled.
 6. **Store** replaces `nodes`, `edges`, `chunks`, vectors, and file hashes transactionally.
 7. **Verify** rejects a run that found supported files but extracted zero symbols.
+
+SQLite uses WAL mode and full synchronous commits. Index replacement and incremental updates occur
+inside immediate transactions, so readers continue using the last committed snapshot while a
+worker prepares the next one. The JSON pipeline checkpoint is written to a temporary file, flushed
+to disk, and atomically replaced.
 
 The Web UI exposes the phase, percentage, duration, files processed, symbols extracted, edges
 resolved, and index path. Exceptions produce an `error` phase and message; they are not reported
@@ -28,6 +37,10 @@ If no index exists, an incremental request automatically performs the initial fu
 
 Symbols use stable IDs derived from repository-relative path, qualified name, and symbol kind.
 This prevents same-named functions in different files from collapsing into one graph node.
+
+MCP sessions automatically enqueue an incremental run 10 minutes after their most recent tool
+call. This is a debounce: continued activity postpones the run, preventing repeated indexing while
+an agent is actively making calls. Session activity and the deadline are persisted in the registry.
 
 ## Embeddings and local RAG
 

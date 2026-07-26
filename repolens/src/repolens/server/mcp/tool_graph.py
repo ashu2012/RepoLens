@@ -11,12 +11,12 @@ def _related(symbol: str, direction: str, kind: str | None, repo_id: str | None)
 
 @mcp.tool()
 async def find_callers(symbol: str, repo_id: str | None = None) -> str:
-    return _related(symbol, "in", "CALLS", repo_id)
+    return await state.run_sync(_related, symbol, "in", "CALLS", repo_id)
 
 
 @mcp.tool()
 async def find_callees(symbol: str, repo_id: str | None = None) -> str:
-    return _related(symbol, "out", "CALLS", repo_id)
+    return await state.run_sync(_related, symbol, "out", "CALLS", repo_id)
 
 
 @mcp.tool()
@@ -34,4 +34,4 @@ async def query_graph(
     if pattern not in patterns:
         raise ValueError(f"Unsupported pattern. Choose one of: {', '.join(patterns)}")
     direction, kind = patterns[pattern]
-    return _related(target, direction, kind, repo_id)
+    return await state.run_sync(_related, target, direction, kind, repo_id)
