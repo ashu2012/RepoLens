@@ -14,7 +14,12 @@ Windows maintainers can generate both the portable executable and guided
 installer in one command:
 
 ```powershell
+winget install --exact --id JRSoftware.InnoSetup
 .\packaging\windows\build-windows.ps1 -Version 0.2.0 -Python python
+.\packaging\windows\build-windows.ps1 `
+  -Version 0.2.0 `
+  -Python python `
+  -Iscc "C:\Path\To\Inno Setup 6\ISCC.exe"
 ```
 
 The generated `dist` application includes Python and dashboard assets. Use it

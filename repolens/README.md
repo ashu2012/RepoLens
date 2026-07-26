@@ -133,7 +133,11 @@ repolens serve
 
 # Or use as MCP server (for AI coding tools)
 repolens mcp
+
+
 ```
+## build release
+packaging\README.md
 
 ## 🏗️ Architecture
 
