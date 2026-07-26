@@ -1,5 +1,8 @@
 # 🔍 RepoLens
 
+[Download Windows installer or portable EXE](https://github.com/ashu2012/RepoLens/releases/latest)
+· [Installer build instructions](../docs/releases.md)
+
 **Local-first code intelligence platform** — Semantic search, knowledge graphs, and context distillation for AI coding agents.
 
 > *Give your AI coding tools deep understanding of your codebase with 90%+ token savings.*
@@ -85,6 +88,13 @@ Features that **no single reference project provides**:
 | **🔄 Budget-Enforced Context** | Hard token budget with automatic truncation and utilization tracking |
 
 ## 🚀 Quick Start
+
+### Download on Windows
+
+Most users should download `RepoLens-<version>-Setup-x64.exe` from the
+[latest release](https://github.com/ashu2012/RepoLens/releases/latest). A
+portable `RepoLens.exe` and `SHA256SUMS.txt` are published beside it. The
+bundles include Python; end users do not need to install Python.
 
 ### Installed application lifecycle
 

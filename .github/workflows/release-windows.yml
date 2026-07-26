@@ -1,0 +1,96 @@
+name: Release Windows installer
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version without the v prefix
+        required: true
+        default: 0.1.0
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    env:
+      PYTHON_VERSION: "3.11"
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: repolens/pyproject.toml
+
+      - name: Resolve version
+        id: version
+        shell: pwsh
+        run: |
+          if ("${{ github.ref_type }}" -eq "tag") {
+            $version = "${{ github.ref_name }}".TrimStart("v")
+          } else {
+            $version = "${{ inputs.version }}"
+          }
+          "value=$version" >> $env:GITHUB_OUTPUT
+
+      - name: Install build dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip wheel
+          python -m pip install ./repolens nuitka ordered-set zstandard pytest pytest-asyncio
+          choco install innosetup --yes --no-progress
+
+      - name: Test
+        working-directory: repolens
+        run: python -m pytest -q
+
+      - name: Build portable EXE and installer
+        shell: pwsh
+        run: >
+          ./repolens/packaging/windows/build-windows.ps1
+          -Version "${{ steps.version.outputs.value }}"
+          -Python "python"
+
+      - name: Create checksums
+        shell: pwsh
+        run: |
+          $version = "${{ steps.version.outputs.value }}"
+          $files = @(
+            "repolens/dist/RepoLens.exe",
+            "repolens/dist/RepoLens-$version-Setup-x64.exe"
+          )
+          $lines = foreach ($file in $files) {
+            $hash = (Get-FileHash $file -Algorithm SHA256).Hash.ToLowerInvariant()
+            "$hash  $([IO.Path]::GetFileName($file))"
+          }
+          $lines | Set-Content -Encoding ascii "repolens/dist/SHA256SUMS.txt"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: RepoLens-Windows-${{ steps.version.outputs.value }}
+          path: |
+            repolens/dist/RepoLens.exe
+            repolens/dist/RepoLens-${{ steps.version.outputs.value }}-Setup-x64.exe
+            repolens/dist/SHA256SUMS.txt
+          if-no-files-found: error
+
+      - name: Publish GitHub Release assets
+        if: github.ref_type == 'tag'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $version = "${{ steps.version.outputs.value }}"
+          gh release create "${{ github.ref_name }}" `
+            "repolens/dist/RepoLens.exe" `
+            "repolens/dist/RepoLens-$version-Setup-x64.exe" `
+            "repolens/dist/SHA256SUMS.txt" `
+            --verify-tag `
+            --generate-notes `
+            --title "RepoLens ${{ github.ref_name }}"

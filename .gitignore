@@ -1,6 +1,7 @@
 repolens/src/repolens/core/distill/
 repolens/src/repolens/core/distill/
-*.pvc
+*.pyc
+*.lock
 repolens/src/repolens/core/graph/__pycache__/*.pyc
 repolens/src/repolens/core/*/__pycache__/*.pyc
 repolens/src/repolens/core/*.pyc
@@ -45,3 +46,4 @@ repolens/src/repolens/cli/__pycache__
 repolens/src/repolens/server/installer/__pycache__
 repowise/tests/fixtures/jvm_sample/.gradle/8.9/fileHashes/fileHashes.lock
 repowise/tests/fixtures/jvm_sample/.gradle/buildOutputCleanup/buildOutputCleanup.lock
+repolens/.repolens/registry.db

@@ -15,6 +15,7 @@ token-efficient context layer—without sending your source code to a hosted ind
 [![MCP](https://img.shields.io/badge/Model_Context_Protocol-ready-6B4EFF)](https://modelcontextprotocol.io/)
 [![License](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
 [![Development status](https://img.shields.io/badge/status-early_access-orange)](ROADMAP.md)
+[![Latest release](https://img.shields.io/github/v/release/ashu2012/RepoLens?style=flat&label=download)](https://github.com/ashu2012/RepoLens/releases/latest)
 
 [⭐ Star RepoLens](https://github.com/ashu2012/RepoLens) ·
 [🚀 Try it locally](#quick-start) ·
@@ -33,6 +34,22 @@ AI coding tools are excellent at reasoning about code once they have the right c
 Finding that context is the expensive part. RepoLens scans a repository once, extracts its
 structure with Tree-sitter, and stores durable local indexes that tools can query instead of
 re-reading the entire tree for every task.
+
+## Download for Windows
+
+Download the ready-to-run files from the
+[latest GitHub Release](https://github.com/ashu2012/RepoLens/releases/latest):
+
+- **`RepoLens-<version>-Setup-x64.exe`** — recommended guided installer.
+- **`RepoLens.exe`** — portable version with no Python installation required.
+- **`SHA256SUMS.txt`** — download verification hashes.
+
+The installer initializes RepoLens, starts the local daemon, creates dashboard
+shortcuts, and opens `http://127.0.0.1:38451/dashboard`. It does not modify
+Claude, Codex, Cursor, VS Code, or other AI-client configuration files.
+
+See [Downloads and releases](docs/releases.md) for verification, portable setup,
+release creation, and local installer build instructions.
 
 > [!IMPORTANT]
 > RepoLens is in early access. AST indexing, symbol chunking, local graph persistence, the Web
@@ -320,6 +337,7 @@ RAG, architecture, observability, and agent tooling. RepoLens itself lives in `r
 ## Documentation
 
 - [Getting started](docs/getting-started.md)
+- [Downloads, releases, and installer builds](docs/releases.md)
 - [Indexing pipeline](docs/indexing.md)
 - [MCP and REST API](docs/mcp-api.md)
 - [Architecture](ARCHITECTURE.md)
