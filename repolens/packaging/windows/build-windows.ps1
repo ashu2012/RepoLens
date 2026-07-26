@@ -8,14 +8,31 @@ $ErrorActionPreference = "Stop"
 $ProjectDir = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 Push-Location $ProjectDir
 try {
-    & $Python -m nuitka `
-        --assume-yes-for-downloads `
-        --onefile `
-        --follow-imports `
-        "--include-data-dir=$ProjectDir\templates=templates" `
-        "--output-dir=$ProjectDir\dist" `
-        --output-filename=RepoLens.exe `
-        "$ProjectDir\src\repolens\__main__.py"
+    $PythonBase = (& $Python -c "import sys; print(sys.base_prefix)").Trim()
+    if ($LASTEXITCODE -ne 0 -or -not $PythonBase) {
+        throw "Unable to determine the Python runtime directory."
+    }
+
+    $nuitkaArgs = @(
+        "-m", "nuitka",
+        "--assume-yes-for-downloads",
+        "--onefile",
+        "--follow-imports",
+        "--remove-output",
+        "--include-data-dir=$ProjectDir\templates=templates",
+        "--output-dir=$ProjectDir\dist",
+        "--output-filename=RepoLens.exe"
+    )
+
+    # Conda keeps ctypes' native libffi dependency under Library\bin, where
+    # Nuitka does not always discover it for one-file builds.
+    $ffiDll = Join-Path $PythonBase "Library\bin\ffi-8.dll"
+    if (Test-Path -LiteralPath $ffiDll) {
+        $nuitkaArgs += "--include-data-files=$ffiDll=ffi-8.dll"
+    }
+
+    $nuitkaArgs += "$ProjectDir\src\repolens\__main__.py"
+    & $Python @nuitkaArgs
     if ($LASTEXITCODE -ne 0) { throw "Nuitka build failed." }
 
     if (-not $Iscc) {

@@ -686,3 +686,5 @@ repolens/dist/__main__.dist/tzdata/zoneinfo/US/Pacific
 repolens/dist/__main__.dist/tzdata/zoneinfo/US/Samoa
 repolens/.venv-release
 repolens/dist/RepoLens-0.2.0-Setup-x64.exe
+repolens/dist/build.stderr.log
+repolens/dist/build.stdout.log
