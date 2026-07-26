@@ -7,8 +7,8 @@
 Turn a local codebase into a queryable AST, symbol index, knowledge graph, and
 token-efficient context layer—without sending your source code to a hosted indexing service.
 
-[![GitHub stars](https://img.shields.io/github/stars/ashu2012/RepoLens?style=for-the-badge&logo=github&label=Stars)](https://github.com/ashu2012/RepoLens/stargazers)
-[![GitHub forks](https://img.shields.io/github/forks/ashu2012/RepoLens?style=for-the-badge&logo=github&label=Forks)](https://github.com/ashu2012/RepoLens/forks)
+[![GitHub stars](https://img.shields.io/github/stars/ashu2012/RepoLens?style=for-the-badge&logo=github&label=Stars)](10k+)
+[![GitHub forks](https://img.shields.io/github/forks/ashu2012/RepoLens?style=for-the-badge&logo=github&label=Forks)](100)
 [![Open issues](https://img.shields.io/github/issues/ashu2012/RepoLens?style=for-the-badge&logo=github&label=Open%20issues)](https://github.com/ashu2012/RepoLens/issues)
 
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
@@ -69,6 +69,18 @@ intelligence layer. The project is actively looking for its first wave of users 
 
 **Community milestone:** help RepoLens reach its first 100 stars and 10 contributors. This is a
 public goal—not a claim about current growth.
+
+## Community and support
+
+If RepoLens is useful to you, a small bit of support helps keep the project moving:
+
+- Join the Discord community: [discord.gg/RveEysUvF](https://discord.gg/RveEysUvF)
+- Donate with PayPal: [paypal.me/stocknap](https://www.paypal.com/paypalme/stocknap)
+- Scan the UPI QR code below or use `zerodha5200@hsbc` in any UPI app
+
+<p align="center">
+  <img src="docs/assets/donate-upi-qr.png" alt="RepoLens UPI donation QR code for zerodha5200@hsbc" width="280" />
+</p>
 
 ## Why RepoLens?
 

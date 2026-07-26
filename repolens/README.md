@@ -2,6 +2,8 @@
 
 [Download Windows installer or portable EXE](https://github.com/ashu2012/RepoLens/releases/latest)
 · [Installer build instructions](../docs/releases.md)
+· [Discord](https://discord.gg/RveEysUvF)
+· [Donate](https://www.paypal.com/paypalme/stocknap)
 
 **Local-first code intelligence platform** — Semantic search, knowledge graphs, and context distillation for AI coding agents.
 
