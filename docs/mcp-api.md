@@ -200,3 +200,28 @@ Implemented index-backed tools:
 Pass `repo_id` when more than one indexed repository is registered. Context tools enforce a token
 budget, truncate oversized primary symbols rather than returning empty content, and report the
 estimated reduction in their rendered output.
+
+## Filesystem tools for agent workflows
+
+RepoLens also exposes a small set of local filesystem operations through the same MCP server so
+agents can inspect and update files without leaving the session:
+
+- `list_directory`
+- `read_file`
+- `write_file`
+- `create_directory`
+- `delete_file`
+- `delete_directory`
+- `move_path`
+- `get_file_info`
+- `search_files`
+- `create_venv`
+
+These tools are intentionally rooted to the current workspace and refuse to resolve paths outside
+it. `create_venv` returns platform-aware activation guidance:
+
+- Windows: `Scripts\\Activate.ps1` and `Scripts\\activate.bat`
+- macOS/Linux: `bin/activate`
+
+The same MCP server is available over stdio and through the HTTP bridge at
+`/api/mcp/tools` and `/api/mcp/call`.
