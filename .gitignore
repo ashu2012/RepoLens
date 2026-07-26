@@ -689,3 +689,9 @@ repolens/dist/RepoLens-0.2.0-Setup-x64.exe
 repolens/dist/build.stderr.log
 repolens/dist/build.stdout.log
 repolens/.venv-release-cpython
+repolens/cpython-build.stderr.log
+repolens/cpython-build.stdout.log
+repolens/nuitka-crash-report.xml
+repolens/dist/cpython-build.stderr.log
+repolens/dist/cpython-build.stdout.log
+repolens/dist/__main__.build/ccache-36500.txt

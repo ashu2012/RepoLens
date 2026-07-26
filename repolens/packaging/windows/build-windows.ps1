@@ -13,6 +13,11 @@ try {
         throw "Unable to determine the Python runtime directory."
     }
 
+    $BuildDir = Join-Path $ProjectDir "dist\release-build"
+    $PortableExe = Join-Path $ProjectDir "dist\RepoLens.exe"
+    # Keep Nuitka's writable bytecode cache inside the build tree. This avoids
+    # stale or locked cache entries shared by other Python/Nuitka installs.
+    $env:NUITKA_CACHE_DIR_MODULE_CACHE = Join-Path $BuildDir "module-cache"
     $nuitkaArgs = @(
         "-m", "nuitka",
         "--assume-yes-for-downloads",
@@ -20,7 +25,7 @@ try {
         "--follow-imports",
         "--remove-output",
         "--include-data-dir=$ProjectDir\templates=templates",
-        "--output-dir=$ProjectDir\dist",
+        "--output-dir=$BuildDir",
         "--output-filename=RepoLens.exe"
     )
 
@@ -34,6 +39,7 @@ try {
     $nuitkaArgs += "$ProjectDir\src\repolens\__main__.py"
     & $Python @nuitkaArgs
     if ($LASTEXITCODE -ne 0) { throw "Nuitka build failed." }
+    Copy-Item -LiteralPath (Join-Path $BuildDir "RepoLens.exe") -Destination $PortableExe -Force
 
     if (-not $Iscc) {
         $candidates = @(
