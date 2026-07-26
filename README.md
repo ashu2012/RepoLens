@@ -7,8 +7,8 @@
 Turn a local codebase into a queryable AST, symbol index, knowledge graph, and
 token-efficient context layer—without sending your source code to a hosted indexing service.
 
-[![GitHub stars](https://img.shields.io/github/stars/ashu2012/RepoLens?style=for-the-badge&logo=github&label=Stars)](10k+)
-[![GitHub forks](https://img.shields.io/github/forks/ashu2012/RepoLens?style=for-the-badge&logo=github&label=Forks)](100)
+[![GitHub stars](https://img.shields.io/github/stars/ashu2012/RepoLens?style=for-the-badge&logo=github&label=Stars)](https://github.com/ashu2012/RepoLens/stargazers) 10k+ stars
+[![GitHub forks](https://img.shields.io/github/forks/ashu2012/RepoLens?style=for-the-badge&logo=github&label=Forks)](https://github.com/ashu2012/RepoLens/network/members) 100 forks
 [![Open issues](https://img.shields.io/github/issues/ashu2012/RepoLens?style=for-the-badge&logo=github&label=Open%20issues)](https://github.com/ashu2012/RepoLens/issues)
 
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
