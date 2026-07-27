@@ -84,7 +84,9 @@ def repolens_publish_active_index(repo_root: str | Path, index_path: str | Path)
     """Atomically publish a staged index to the canonical path and update the pointer."""
     root = Path(repo_root).expanduser().resolve()
     target = Path(index_path).expanduser().resolve()
-    published = repolens_published_index_path(root)
+    version_id = target.parent.name or f"{int(time.time() * 1000)}"
+    published = repolens_versioned_index_root(root) / version_id / "index.db"
+    canonical = repolens_published_index_path(root)
     pointer = repolens_active_index_pointer(root)
     from repolens.core.graph.store import GraphStore
 
@@ -101,6 +103,13 @@ def repolens_publish_active_index(repo_root: str | Path, index_path: str | Path)
     )
     tmp_pointer.write_text(str(published), encoding="utf-8")
     os.replace(tmp_pointer, pointer)
+
+    try:
+        mirror_source = GraphStore(published, read_only=True)
+        mirror_source.copy_to(canonical)
+    except Exception:
+        # The versioned snapshot is the source of truth; canonical mirroring is best effort.
+        pass
     return published
 
 

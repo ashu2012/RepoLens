@@ -133,7 +133,11 @@ def test_server_state_prefers_repo_lens_install_root_when_indexed(tmp_path, monk
 def test_indexing_service_registers_and_persists_job(tmp_path, monkeypatch):
     from repolens.core.persistence.registry import RegistryStore
     from repolens.core.pipeline.service import IndexingService
-    from repolens.core.paths import repolens_current_index_path, repolens_active_index_pointer
+    from repolens.core.paths import (
+        repolens_active_index_pointer,
+        repolens_current_index_path,
+        repolens_versioned_index_root,
+    )
 
     repository = tmp_path / "project"
     repository.mkdir()
@@ -158,11 +162,12 @@ def test_indexing_service_registers_and_persists_job(tmp_path, monkeypatch):
     assert repo["files_count"] == 1
     assert result["registered"] is False
     assert job["status"] == "completed"
-    assert repolens_current_index_path(repository) == repository / ".repolens" / "index.db"
+    current_index = repolens_current_index_path(repository)
+    assert current_index is not None
+    assert current_index.parent.parent == repolens_versioned_index_root(repository)
     assert repolens_active_index_pointer(repository).exists()
-    assert Path(repolens_active_index_pointer(repository).read_text(encoding="utf-8").strip()) == (
-        repository / ".repolens" / "index.db"
-    )
+    assert Path(repolens_active_index_pointer(repository).read_text(encoding="utf-8").strip()) == current_index
+    assert (repository / ".repolens" / "index.db").exists()
     assert not (repository / ".repolens" / "staging").exists()
     reopened = RegistryStore(registry_path)
     assert reopened.get_repo(result["repo_id"])["status"] == "indexed"
