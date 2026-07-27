@@ -189,13 +189,13 @@ def start(host: str, port: int, no_open: bool, runtime_dir: str | None) -> None:
             ),
             force=False,
         )
-        console.print("[green]✓[/] RepoLens runtime initialized")
+        console.print("[green]OK[/] RepoLens runtime initialized")
 
     # Check if daemon is already running (from a previous background launch)
     from repolens.runtime.ipc import IPCClient
     if IPCClient(runtime).ping():
         url = f"http://{host}:{port}/dashboard"
-        console.print("[green]✓[/] RepoLens daemon is already running.")
+        console.print("[green]OK[/] RepoLens daemon is already running.")
         console.print(f"[bold]Dashboard:[/] {url}")
         console.print("[dim]Server logs remain visible in this window.[/]")
         if not no_open:
@@ -211,7 +211,7 @@ def start(host: str, port: int, no_open: bool, runtime_dir: str | None) -> None:
         f"[green]API Docs:[/]   {api_docs}\n"
         f"[yellow]Status:[/]     Server starting...\n\n"
         f"[dim]Press [bold]Ctrl+C[/bold] to stop the server[/]",
-        title="📊 RepoLens",
+        title="RepoLens",
         border_style="cyan",
     ))
     console.print()
@@ -223,7 +223,7 @@ def start(host: str, port: int, no_open: bool, runtime_dir: str | None) -> None:
             f"[green]Dashboard:[/]  {url}\n"
             f"[green]API Docs:[/]   {api_docs}\n"
             f"[dim]Server logs continue in this window. Press [bold]Ctrl+C[/bold] to stop.[/]",
-            title="✅ Ready",
+            title="Ready",
             border_style="green",
         ))
         if not no_open:
