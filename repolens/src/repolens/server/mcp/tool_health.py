@@ -8,7 +8,19 @@ from .server import mcp, state
 
 @mcp.tool()
 async def get_health(repo_id: str | None = None) -> str:
-    repo = state.repository(repo_id)
+    from repolens.core.persistence import registry
+
+    if repo_id is None:
+        repo = state.active_repository()
+        if repo is None:
+            raise ValueError("No working repository is available")
+    else:
+        try:
+            repo = state.repository(repo_id)
+        except ValueError:
+            repo = registry.get_repo(repo_id)
+            if repo is None:
+                raise ValueError(f"Unknown repository: {repo_id}")
     stats = {
         "repo_id": repo["id"],
         "status": repo["status"],

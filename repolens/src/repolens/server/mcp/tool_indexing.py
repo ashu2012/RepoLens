@@ -137,7 +137,19 @@ async def get_index_status(
             if not job:
                 raise ValueError(f"Unknown index job: {job_id}")
             return job
-        repo = state.repository(repo_id)
+        if repo_id is None:
+            repo = state.active_repository()
+            if repo is None:
+                return {
+                    "status": "idle",
+                    "phase": "idle",
+                    "progress": 0,
+                    "repo_id": None,
+                }
+        else:
+            repo = registry.get_repo(repo_id)
+            if repo is None:
+                raise ValueError(f"Unknown repository: {repo_id}")
         return registry.latest_job(repo["id"]) or {
             "repo_id": repo["id"],
             "status": "idle",
