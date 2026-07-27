@@ -53,6 +53,35 @@ async def test_full_search_cross_file_and_incremental(tmp_path):
     assert len(store.find_symbols("normalize_name")) == 1
 
 
+@pytest.mark.asyncio
+async def test_kotlin_top_level_function_is_indexed_and_has_callers(tmp_path):
+    from repolens.core.graph.store import GraphStore
+    from repolens.core.pipeline.orchestrator import PipelineOrchestrator
+    from repolens.core.search.repository import RepositorySearch
+
+    (tmp_path / "GreetingUtil.kt").write_text(
+        "package com.atp.myapplication\n\n"
+        "fun sayHello(to: String): String =\n"
+        "    \"Hello, $to!\"\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "Main.kt").write_text(
+        "package com.atp.myapplication\n\n"
+        "fun greet() = sayHello(\"world\")\n",
+        encoding="utf-8",
+    )
+
+    await PipelineOrchestrator().run_full(str(tmp_path))
+
+    index = RepositorySearch(tmp_path)
+    symbols = index.symbols("sayHello")
+    callers = GraphStore(tmp_path / ".repolens" / "index.db").related("sayHello", "in", "CALLS")
+
+    assert any(symbol["name"] == "sayHello" for symbol in symbols)
+    assert any(symbol["kind"] == "function" for symbol in symbols)
+    assert any(row["name"] == "greet" for row in callers)
+
+
 def test_registry_survives_reopen(tmp_path):
     from repolens.core.persistence.registry import RegistryStore
 

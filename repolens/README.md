@@ -236,6 +236,9 @@ When `repo_id` is omitted, RepoLens now picks the best available repository auto
 the current workspace if it already has an index, then the RepoLens install/project root if
 that repo is indexed, and then the most recently indexed repository. You can pin the default
 with `REPOLENS_DEFAULT_REPO_ID` or `REPOLENS_WORKSPACE` when you want a fixed startup context.
+For agent workflows, use `switch_working_repository` to choose a project, then `index_repository`
+or `reindex_repository` to build or rebuild it on demand. `get_working_repository` shows the
+current session selection.
 
 ### Available Tools
 
@@ -254,6 +257,10 @@ with `REPOLENS_DEFAULT_REPO_ID` or `REPOLENS_WORKSPACE` when you want a fixed st
 | `get_communities` | Group symbols into graph communities |
 | `get_health` | Index stats, staleness, coverage |
 | `list_repos` | List repositories in the durable registry |
+| `get_working_repository` | Show the current MCP session repository |
+| `switch_working_repository` | Activate a repository or project directory for this session |
+| `index_repository` | Select and queue an index job for a repository |
+| `reindex_repository` | Force a full or incremental rebuild for a repository |
 | `index_current_directory` | Register the workspace and start an async index |
 | `get_index_status` | Monitor a durable asynchronous index job |
 

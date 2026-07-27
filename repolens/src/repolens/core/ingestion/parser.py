@@ -134,7 +134,13 @@ class CodeParser:
                 if name_node:
                     return text(name_node)
                 for child in node.named_children:
-                    if child.type in {"identifier", "type_identifier", "property_identifier"}:
+                    if child.type in {
+                        "identifier",
+                        "simple_identifier",
+                        "type_identifier",
+                        "property_identifier",
+                        "field_identifier",
+                    }:
                         return text(child)
                 return f"<anonymous:{node.start_point[0] + 1}>"
 
@@ -211,6 +217,15 @@ class CodeParser:
                     function = node.child_by_field_name("function")
                     if function is None:
                         function = node.child_by_field_name("name")
+                    if function is None and node.named_children:
+                        first_child = node.named_children[0]
+                        if first_child.type not in {
+                            "call_suffix",
+                            "value_arguments",
+                            "argument_list",
+                            "type_arguments",
+                        }:
+                            function = first_child
                     if function is not None:
                         edges.append(
                             EdgeInfo(

@@ -57,12 +57,27 @@ def select_repository(
     repo_id: str | None = None,
     *,
     cwd: str | Path | None = None,
+    session_id: str | None = None,
+    require_indexed: bool = True,
 ) -> dict[str, Any] | None:
     """Return the best repository candidate for the current call."""
+    def _best(candidates: list[dict[str, Any]], workspace: Path) -> dict[str, Any] | None:
+        if not candidates:
+            return None
+        return sorted(candidates, key=lambda repo: _score_repo(repo, workspace))[0]
+
+    def _indexed(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        return [
+            repo for repo in candidates
+            if repolens_current_index_path(repo["local_path"]) is not None
+        ]
+
     if repo_id:
         repo = registry.get_repo(repo_id)
         if repo is None:
             raise ValueError(f"Unknown repository: {repo_id}")
+        if require_indexed and repolens_current_index_path(repo["local_path"]) is None:
+            raise ValueError(f"Repository is not indexed: {repo['local_path']}")
         return repo
 
     workspace = Path(cwd or Path.cwd()).expanduser().resolve()
@@ -70,53 +85,70 @@ def select_repository(
     if not repos:
         return None
 
+    if session_id:
+        session = registry.get_mcp_session(session_id)
+        if session and session.get("repo_id"):
+            session_repo = registry.get_repo(session["repo_id"])
+            if session_repo:
+                if require_indexed and repolens_current_index_path(session_repo["local_path"]) is None:
+                    raise ValueError(f"Repository is not indexed: {session_repo['local_path']}")
+                return session_repo
+
     env_repo_id = os.environ.get("REPOLENS_DEFAULT_REPO_ID")
     if env_repo_id:
         repo = registry.get_repo(env_repo_id)
         if repo is not None:
+            if require_indexed and repolens_current_index_path(repo["local_path"]) is None:
+                raise ValueError(f"Repository is not indexed: {repo['local_path']}")
             return repo
 
     env_workspace = os.environ.get("REPOLENS_WORKSPACE") or os.environ.get("REPOLENS_REPO_PATH")
     if env_workspace:
         env_path = Path(env_workspace).expanduser().resolve()
-        env_matches = [
-            repo for repo in repos
-            if _contains(_repo_path(repo), env_path)
-            and repolens_current_index_path(repo["local_path"]) is not None
-        ]
+        env_matches = [repo for repo in repos if _contains(_repo_path(repo), env_path)]
         if env_matches:
-            return sorted(env_matches, key=lambda repo: _score_repo(repo, env_path))[0]
+            if require_indexed:
+                indexed = _indexed(env_matches)
+                if not indexed:
+                    raise ValueError(
+                        f"Repository at '{env_path}' is not indexed; index it first or switch to another repository"
+                    )
+                return _best(indexed, env_path)
+            return _best(env_matches, env_path)
 
-    cwd_matches = [
-        repo for repo in repos
-        if _contains(_repo_path(repo), workspace)
-        and repolens_current_index_path(repo["local_path"]) is not None
-    ]
+    cwd_matches = [repo for repo in repos if _contains(_repo_path(repo), workspace)]
     if cwd_matches:
-        return sorted(cwd_matches, key=lambda repo: _score_repo(repo, workspace))[0]
+        if require_indexed:
+            indexed = _indexed(cwd_matches)
+            if not indexed:
+                raise ValueError(
+                    f"Repository at '{workspace}' is not indexed; index it first or switch to another repository"
+                )
+            return _best(indexed, workspace)
+        return _best(cwd_matches, workspace)
 
     install_roots = {
         repolens_project_root().resolve(),
         repolens_package_root().resolve(),
     }
-    install_matches = [
-        repo for repo in repos
-        if _repo_path(repo) in install_roots
-        and repolens_current_index_path(repo["local_path"]) is not None
-    ]
+    install_matches = [repo for repo in repos if _repo_path(repo) in install_roots]
     if install_matches:
-        return sorted(install_matches, key=lambda repo: _score_repo(repo, workspace))[0]
+        if require_indexed:
+            indexed = _indexed(install_matches)
+            if not indexed:
+                raise ValueError(
+                    "RepoLens install directory is not indexed; index it first or switch to another repository"
+                )
+            return _best(indexed, workspace)
+        return _best(install_matches, workspace)
 
-    indexed = [
-        repo
-        for repo in repos
-        if repolens_current_index_path(repo["local_path"]) is not None
-    ]
-    if indexed:
-        return sorted(indexed, key=lambda repo: _score_repo(repo, workspace))[0]
-
-    if len(repos) == 1:
-        return repos[0]
+    if require_indexed:
+        indexed = _indexed(repos)
+        if indexed:
+            return _best(indexed, workspace)
+    else:
+        if len(repos) == 1:
+            return repos[0]
 
     return None
 
@@ -126,11 +158,19 @@ def select_repository_by_path(
     *,
     repo_id: str | None = None,
     cwd: str | Path | None = None,
+    session_id: str | None = None,
 ) -> dict[str, Any] | None:
     """Return the best repository for recording activity."""
     workspace = Path(cwd or Path.cwd()).expanduser().resolve()
     if repo_id:
         return registry.get_repo(repo_id)
+
+    if session_id:
+        session = registry.get_mcp_session(session_id)
+        if session and session.get("repo_id"):
+            session_repo = registry.get_repo(session["repo_id"])
+            if session_repo is not None:
+                return session_repo
 
     repos = list(registry.list_repos())
     if not repos:
@@ -140,4 +180,4 @@ def select_repository_by_path(
     if cwd_matches:
         return sorted(cwd_matches, key=lambda repo: _score_repo(repo, workspace))[0]
 
-    return select_repository(registry, cwd=workspace)
+    return select_repository(registry, cwd=workspace, require_indexed=False)

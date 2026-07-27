@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from repolens.core.pipeline.service import indexing_service
 from repolens.core.pipeline.service import resolve_index_target
+from repolens.core.paths import repolens_current_index_path
 
 from .server import mcp, state
 
@@ -24,6 +26,100 @@ async def index_current_directory(
     """
     target = resolve_index_target(path)
     return await state.run_sync(indexing_service.index_directory, target, mode)
+
+
+def _repo_payload(repo: dict[str, Any], *, registered: bool = False) -> dict[str, Any]:
+    index_path = repolens_current_index_path(repo["local_path"])
+    return {
+        "repo_id": repo["id"],
+        "repository": repo["name"],
+        "local_path": repo["local_path"],
+        "repository_status": repo.get("status"),
+        "registered": registered,
+        "indexed": index_path is not None,
+        "index_path": str(index_path) if index_path else None,
+        "session_id": state.session_id(),
+    }
+
+
+@mcp.tool()
+async def get_working_repository() -> dict[str, Any]:
+    """Return the repository currently selected for this MCP session, if any."""
+    repo = await state.run_sync(state.active_repository)
+    if repo is None:
+        return {
+            "status": "no_active_repository",
+            "repo": None,
+            "session_id": state.session_id(),
+        }
+    return {
+        "status": "active_repository",
+        **_repo_payload(repo),
+    }
+
+
+@mcp.tool()
+async def switch_working_repository(
+    repo_id: str | None = None,
+    path: str | None = None,
+    register: bool = False,
+) -> dict[str, Any]:
+    """Switch the current MCP session to a repository or project directory."""
+    repo, registered = await state.run_sync(
+        state.set_active_repository,
+        repo_id,
+        path=path,
+        register=register,
+    )
+    return {
+        "status": "repository_selected",
+        "registered": registered,
+        **_repo_payload(repo),
+        "session": repo.get("mcp_session"),
+    }
+
+
+@mcp.tool()
+async def index_repository(
+    repo_id: str | None = None,
+    path: str | None = None,
+    mode: str = "auto",
+    register: bool = True,
+) -> dict[str, Any]:
+    """Select a repository and queue a durable index job for it."""
+    repo, registered = await state.run_sync(
+        state.set_active_repository,
+        repo_id,
+        path=path,
+        register=register,
+    )
+    job, created = await state.run_sync(
+        indexing_service.start_index,
+        repo["id"],
+        mode,
+        trigger="mcp",
+        session_id=state.session_id(),
+    )
+    return {
+        "status": "indexing_started" if created else "indexing_already_active",
+        "registered": registered,
+        **_repo_payload(repo),
+        "session": repo.get("mcp_session"),
+        "job_id": job["id"],
+        "job_status": job["status"],
+        "mode": job["mode"],
+    }
+
+
+@mcp.tool()
+async def reindex_repository(
+    repo_id: str | None = None,
+    path: str | None = None,
+    mode: str = "full",
+    register: bool = True,
+) -> dict[str, Any]:
+    """Force a full or incremental rebuild for the selected repository."""
+    return await index_repository(repo_id=repo_id, path=path, mode=mode, register=register)
 
 
 @mcp.tool()

@@ -322,6 +322,41 @@ async def test_mcp_index_current_directory_without_path_uses_repo_package_root(m
     assert captured["args"][0] == repolens_package_root()
 
 
+@pytest.mark.asyncio
+async def test_switch_working_repository_then_index_and_search_without_repo_id(tmp_path, monkeypatch):
+    from repolens.core.persistence.registry import RegistryStore
+    from repolens.core.pipeline.service import indexing_service
+    from repolens.server.mcp import server, tool_indexing, tool_search
+
+    repository = tmp_path / "agent-workspace"
+    repository.mkdir()
+    (repository / "prices.py").write_text(
+        "def lookup_price(symbol):\n    return symbol.lower()\n",
+        encoding="utf-8",
+    )
+    durable_registry = RegistryStore(tmp_path / "data" / "registry.db")
+    _replace_registry(monkeypatch, durable_registry)
+
+    token = server._current_session_id.set("session-switch-1")
+    try:
+        switched = await tool_indexing.switch_working_repository(path=str(repository), register=True)
+        assert switched["status"] == "repository_selected"
+        assert switched["indexed"] is False
+
+        active = await tool_indexing.get_working_repository()
+        assert active["repo_id"] == switched["repo_id"]
+
+        queued = await tool_indexing.index_repository(mode="auto")
+        job = indexing_service.wait(queued["job_id"], timeout=30)
+        assert job["status"] == "completed"
+
+        search_result = await tool_search.search_symbols("lookup_price")
+        assert "lookup_price" in search_result
+    finally:
+        server._current_session_id.reset(token)
+        indexing_service.stop_runtime()
+
+
 def test_openapi_bridge_indexes_current_directory(tmp_path, monkeypatch):
     from fastapi.testclient import TestClient
 

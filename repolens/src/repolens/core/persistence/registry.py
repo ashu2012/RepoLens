@@ -351,6 +351,53 @@ class RegistryStore:
             "next_index_at": next_index_at,
         }
 
+    def set_mcp_session_context(
+        self,
+        session_id: str,
+        repo_id: str | None = None,
+        working_directory: str | None = None,
+    ) -> dict[str, Any]:
+        """Persist the active working repository for a session without queueing reindexing."""
+        now = time.time()
+        current = self.get_mcp_session(session_id)
+        with self._connect() as conn:
+            if current is None:
+                conn.execute(
+                    """INSERT INTO mcp_sessions
+                       (session_id, repo_id, working_directory, last_call_at, next_index_at,
+                        created_at, updated_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        session_id,
+                        repo_id,
+                        working_directory,
+                        now,
+                        None,
+                        now,
+                        now,
+                    ),
+                )
+            else:
+                conn.execute(
+                    """UPDATE mcp_sessions
+                       SET repo_id = COALESCE(?, repo_id),
+                           working_directory = COALESCE(?, working_directory),
+                           last_call_at = ?,
+                           next_index_at = NULL,
+                           claim_owner = NULL,
+                           claim_expires_at = NULL,
+                           updated_at = ?
+                       WHERE session_id = ?""",
+                    (repo_id, working_directory, now, now, session_id),
+                )
+        return self.get_mcp_session(session_id) or {
+            "session_id": session_id,
+            "repo_id": repo_id,
+            "working_directory": working_directory,
+            "last_call_at": now,
+            "next_index_at": None,
+        }
+
     def get_mcp_session(self, session_id: str) -> dict[str, Any] | None:
         with self._connect() as conn:
             row = conn.execute(
