@@ -198,6 +198,35 @@ Data:     /absolute/path/to/RepoLens/repolens/.repolens
 Using the virtual environment's full Python path is the most reliable option. If `python` already
 resolves to the environment where RepoLens is installed, you can use `"python"` instead.
 
+### Example: Claude with local, token-efficient context
+
+Configure Claude Desktop to launch RepoLens as an MCP server. The screenshot below shows the
+minimal command shape; use the absolute virtual-environment path and shared `REPOLENS_DATA_DIR`
+described above for a reliable setup.
+
+<p align="center">
+  <img src="docs/assets/claude-desktop-mcp-config.jpg" alt="RepoLens MCP server configured in Claude Desktop" width="820" />
+</p>
+
+Ask Claude to load the RepoLens MCP tools and index the current project. RepoLens parses the
+project locally and persists its repository index under `.repolens`, so source code does not need
+to be uploaded to a hosted indexing service.
+
+<p align="center">
+  <img src="docs/assets/claude-repolens-indexing-progress.jpg" alt="Claude using RepoLens MCP tools to index a local project and report progress" width="820" />
+</p>
+
+Once indexed, Claude can request focused symbols, relationships, and budgeted context from
+RepoLens instead of repeatedly reading large files or scanning the entire repository. This can
+reduce the amount of repository text placed into the model context, especially across repeated
+questions about the same codebase. Actual savings depend on the query, repository, client, and
+selected context budget; the token count shown here is Claude's client-reported usage for this
+example, not a guaranteed benchmark.
+
+<p align="center">
+  <img src="docs/assets/claude-repolens-token-usage.jpg" alt="Claude invoking RepoLens local indexing with a small client-reported token count" width="820" />
+</p>
+
 ### Claude Code
 
 Add RepoLens to the current project:
