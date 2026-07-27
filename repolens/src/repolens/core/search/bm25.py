@@ -2,9 +2,37 @@ import re
 import math
 from typing import List, Tuple, Dict
 
+_CAMEL_CASE = re.compile(
+    r"[A-Z]+(?=[A-Z][a-z]|\d|$)|[A-Z]?[a-z]+|\d+"
+)
+
+
+def _split_identifier(token: str) -> list[str]:
+    parts: list[str] = []
+    for segment in re.split(r"[_\-/\.]+", token):
+        if not segment:
+            continue
+        camel_parts = _CAMEL_CASE.findall(segment)
+        if camel_parts:
+            parts.extend(camel_parts)
+        else:
+            parts.append(segment)
+    return parts
+
+
 def tokenize(text: str) -> list[str]:
-    tokens = re.split(r"[^\w-]+", text.lower())
-    return [t for t in tokens if len(t) >= 2]
+    tokens: list[str] = []
+    for raw in re.split(r"[^\w\-\/\.]+", text):
+        if not raw:
+            continue
+        lowered = raw.lower()
+        if len(lowered) >= 2:
+            tokens.append(lowered)
+        for part in _split_identifier(raw):
+            part_lower = part.lower()
+            if len(part_lower) >= 2:
+                tokens.append(part_lower)
+    return tokens
 
 class BM25Index:
     def __init__(self, k1: float = 1.2, b: float = 0.75):
