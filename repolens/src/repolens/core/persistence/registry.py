@@ -9,10 +9,18 @@ import time
 from pathlib import Path
 from typing import Any
 
+from repolens.core.paths import repolens_project_root
+from repolens.runtime.bootstrap import RuntimeLocator
+
 
 def default_data_dir() -> Path:
     configured = os.environ.get("REPOLENS_DATA_DIR")
-    return Path(configured).expanduser().resolve() if configured else Path(".repolens").resolve()
+    if configured:
+        return Path(configured).expanduser().resolve() / "repositories"
+    source_root = repolens_project_root()
+    if (source_root / "pyproject.toml").is_file():
+        return source_root / ".repolens" / "repositories"
+    return RuntimeLocator.default_runtime() / "repositories"
 
 
 class RegistryStore:

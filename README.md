@@ -42,6 +42,13 @@ Download the ready-to-run files from the
 - **`RepoLens.exe`** — portable version with no Python installation required.
 - **`SHA256SUMS.txt`** — download verification hashes.
 
+The quickest path is:
+
+1. Open the latest release page.
+2. Under Assets, download `RepoLens-<version>-Setup-x64.exe` for the guided installer or
+   `RepoLens.exe` for a portable build.
+3. Keep `SHA256SUMS.txt` with the download and verify the checksum before running it.
+
 The installer initializes RepoLens, starts the local daemon, creates dashboard
 shortcuts, and opens `http://127.0.0.1:38451/dashboard`. It does not modify
 Claude, Codex, Cursor, VS Code, or other AI-client configuration files.
@@ -79,6 +86,20 @@ If RepoLens is useful to you, a small bit of support helps keep the project movi
 <p align="center">
   <img src="docs/assets/donate-upi-qr.png" alt="RepoLens UPI donation QR code for zerodha5200@hsbc" width="280" />
 </p>
+
+## Who RepoLens helps
+
+| Audience | Hooks | What they get |
+|---|---|---|
+| Technical users | CLI, MCP, REST API, source builds | local AST search, graph traversal, automation, and repeatable workflows |
+| Non-technical users | One-click installer, dashboard, release assets | no Python setup, visible status, safer downloads, and a simple UI |
+| Teams | Shared registry, release checksums, portable EXE | less setup friction and easier support across machines |
+
+RepoLens hooks into the places people already work:
+
+- Your shell, through `repolens` commands
+- Your AI assistant, through MCP
+- Your browser, through the local dashboard
 
 ## Why RepoLens?
 
@@ -321,14 +342,18 @@ Ask the client:
 
 ```text
 Use RepoLens to list indexed repositories. If this workspace is missing, call
-index_current_directory with mode "auto" and monitor get_index_status until it
-completes. Then search for "PipelineOrchestrator" and return its file path and callers.
+index_current_directory with the repository path and mode "auto", then monitor
+get_index_status until it completes. Then search for "PipelineOrchestrator" and
+return its file path and callers.
 ```
 
 The client should invoke `list_repos`, optionally `index_current_directory` and
-`get_index_status`, then `search_symbols` and optionally `find_callers`. Indexing is asynchronous:
-the initial call returns a durable job ID rather than holding the MCP request open. When more than
-one repository is indexed, include the returned `repo_id` in subsequent tool calls.
+`get_index_status`, then `search_symbols` and optionally `find_callers`.
+Indexing is asynchronous: the initial call returns a durable job ID rather than
+holding the MCP request open. When more than one repository is indexed, include
+the returned `repo_id` in subsequent tool calls. If `index_current_directory`
+is called without a path, RepoLens falls back to its own package directory
+instead of the server process cwd.
 
 RepoLens records MCP session activity and schedules an incremental index for 10 minutes after the
 most recent tool call. Continued activity moves that deadline forward. The schedule and job state
@@ -385,6 +410,7 @@ RAG, architecture, observability, and agent tooling. RepoLens itself lives in `r
 - [MCP and REST API](docs/mcp-api.md)
 - [Architecture](ARCHITECTURE.md)
 - [Roadmap](ROADMAP.md)
+- [Package README and build notes](repolens/README.md)
 - [FAQ](docs/faq.md)
 - [Benchmarks](docs/benchmarks.md)
 - [Contributing](CONTRIBUTING.md)

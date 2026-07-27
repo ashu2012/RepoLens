@@ -85,10 +85,12 @@ def add(path: str, name: str | None) -> None:
 @click.option("--full", is_flag=True)
 def index(path: str | None, full: bool) -> None:
     """Index a repository and wait for the durable job."""
-    from repolens.core.pipeline.service import indexing_service
+    from repolens.core.pipeline.service import indexing_service, resolve_index_target
 
-    result = indexing_service.index_directory(Path(path or ".").resolve(),
-                                                mode="full" if full else "auto")
+    result = indexing_service.index_directory(
+        resolve_index_target(path),
+        mode="full" if full else "auto",
+    )
     console.print(f"Job {result['job_id']} started")
     console.print_json(json.dumps(indexing_service.wait(result["job_id"]), default=str))
 
@@ -165,7 +167,8 @@ def start(host: str, port: int, no_open: bool, runtime_dir: str | None) -> None:
     """Start RepoLens server and open the dashboard.
 
     Runs the RepoLens HTTP API server in the foreground, keeping this console
-    window open. Opens the dashboard in your default browser automatically.
+    window open. Opens the dashboard in your default browser automatically and
+    prints a ready banner once the server is actually responding.
     Press Ctrl+C to stop the server and close the window.
     """
     import uvicorn
@@ -180,7 +183,7 @@ def start(host: str, port: int, no_open: bool, runtime_dir: str | None) -> None:
             BootstrapOptions(
                 runtime_dir=runtime,
                 auto_start=False,
-                max_cache_size=5,
+                cache_size_gb=5,
                 cpu_profile="high",
                 telemetry=False,
             ),
@@ -194,16 +197,18 @@ def start(host: str, port: int, no_open: bool, runtime_dir: str | None) -> None:
         url = f"http://{host}:{port}/dashboard"
         console.print("[green]✓[/] RepoLens daemon is already running.")
         console.print(f"[bold]Dashboard:[/] {url}")
+        console.print("[dim]Server logs remain visible in this window.[/]")
         if not no_open:
             webbrowser.open(url)
         return
 
     url = f"http://{host}:{port}/dashboard"
+    api_docs = f"http://{host}:{port}/api/docs"
     console.print()
     console.print(Panel.fit(
         f"[bold cyan]RepoLens Server[/]\n\n"
         f"[green]Dashboard:[/]  {url}\n"
-        f"[green]API Docs:[/]   http://{host}:{port}/api/docs\n"
+        f"[green]API Docs:[/]   {api_docs}\n"
         f"[yellow]Status:[/]     Server starting...\n\n"
         f"[dim]Press [bold]Ctrl+C[/bold] to stop the server[/]",
         title="📊 RepoLens",
@@ -211,14 +216,37 @@ def start(host: str, port: int, no_open: bool, runtime_dir: str | None) -> None:
     ))
     console.print()
 
-    if not no_open:
-        # Small delay to let server start before opening browser
-        import threading
-        def _open_browser() -> None:
-            import time as _time
-            _time.sleep(2)
+    def _announce_ready() -> None:
+        console.print()
+        console.print(Panel.fit(
+            f"[bold green]RepoLens is running[/]\n\n"
+            f"[green]Dashboard:[/]  {url}\n"
+            f"[green]API Docs:[/]   {api_docs}\n"
+            f"[dim]Server logs continue in this window. Press [bold]Ctrl+C[/bold] to stop.[/]",
+            title="✅ Ready",
+            border_style="green",
+        ))
+        if not no_open:
             webbrowser.open(url)
-        threading.Thread(target=_open_browser, daemon=True).start()
+
+    def _wait_for_ready() -> None:
+        import threading
+        import urllib.request
+
+        health_url = f"http://{host}:{port}/health/ready"
+        deadline = time.time() + 90
+        while time.time() < deadline:
+            try:
+                with urllib.request.urlopen(health_url, timeout=1) as response:
+                    if 200 <= getattr(response, "status", 0) < 400:
+                        _announce_ready()
+                        return
+            except Exception:
+                time.sleep(0.5)
+        _announce_ready()
+
+    import threading
+    threading.Thread(target=_wait_for_ready, daemon=True).start()
 
     try:
         uvicorn.run("repolens.server.app:create_app", host=host, port=port, factory=True, log_level="info")

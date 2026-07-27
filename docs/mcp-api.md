@@ -15,8 +15,9 @@ RepoLens exposes the same persisted repository indexes through FastAPI and FastM
 | `GET` | `/api/jobs/{id}` | Inspect one job, counts, and errors |
 
 Repository registrations and jobs are stored in
-`$REPOLENS_DATA_DIR/registry.db` (default: `./.repolens/registry.db`). Repository indexes remain
-inside each target repository at `.repolens/index.db`. Both databases use SQLite WAL mode,
+`$REPOLENS_DATA_DIR/repositories/registry.db` (default: `<RepoLens checkout>/.repolens/repositories/registry.db`
+when running from source). Repository indexes remain inside each target repository at
+`.repolens/index.db`. Both databases use SQLite WAL mode,
 30-second busy handling, and full synchronous commits. Pipeline checkpoints are atomically
 replaced after an `fsync`, so completed indexes, jobs, and MCP session schedules survive restart.
 
@@ -94,9 +95,11 @@ continue using the configured MCP transport.
 
 ### Index the current MCP workspace
 
-If the client workspace has not been registered yet, call `index_current_directory`. The tool
-registers the MCP server's working directory, starts a full index when `.repolens/index.db` is
-missing, and otherwise starts an incremental index. It returns immediately with a durable job ID.
+If the client workspace has not been registered yet, call `index_current_directory` with the target
+repository path. The tool indexes the requested repository, starts a full index when
+`.repolens/index.db` is missing, and otherwise starts an incremental index. If `path` is omitted,
+RepoLens falls back to its own package directory rather than the server process cwd. It returns
+immediately with a durable job ID.
 
 OpenAPI request:
 
@@ -148,9 +151,9 @@ activity time. The next incremental index is debounced until 10 minutes after th
 call in that session. A later call moves the deadline forward. The schedule is durable, claimed by
 only one running RepoLens process, and executed asynchronously by the indexing worker pool.
 
-Automatic indexing only targets a registered repository. Call `index_current_directory` once when
-the current workspace is missing. Set `REPOLENS_AUTO_INDEX_DELAY_SECONDS` to change the 600-second
-delay or to use a shorter interval in development.
+Automatic indexing only targets a registered repository. Register the workspace first, or call
+`index_current_directory` with an explicit path. Set `REPOLENS_AUTO_INDEX_DELAY_SECONDS` to change
+the 600-second delay or to use a shorter interval in development.
 
 ### Concurrency controls
 

@@ -12,7 +12,7 @@ from .server import mcp, state
 @mcp.tool()
 async def get_architecture(repo_id: str | None = None) -> str:
     def analyze() -> str:
-        graph = state.index(repo_id).store.load_graph()
+        graph = state.index(repo_id).graph()
         declared = [node for node, data in graph.nodes(data=True) if data.get("kind")]
         languages = Counter(graph.nodes[node].get("language") for node in declared)
         kinds = Counter(graph.nodes[node].get("kind") for node in declared)
@@ -31,7 +31,7 @@ async def get_architecture(repo_id: str | None = None) -> str:
 @mcp.tool()
 async def get_communities(repo_id: str | None = None) -> str:
     def detect() -> str:
-        graph = state.index(repo_id).store.load_graph()
+        graph = state.index(repo_id).graph()
         declared = graph.subgraph(
             [node for node, data in graph.nodes(data=True) if data.get("kind")]
         ).copy()

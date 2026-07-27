@@ -185,7 +185,7 @@ After installation, launch RepoLens via Start Menu or run:
 RepoLens start
 ```
 
-The `start` command initializes the runtime (if needed), starts the server, and opens the dashboard — all in a single step. Press **Ctrl+C** to stop.
+The `start` command initializes the runtime (if needed), streams server logs in the console, and opens the dashboard once the server is ready — all in a single step. Press **Ctrl+C** to stop.
 
 For full build details, see [packaging/README.md](packaging/README.md).
 

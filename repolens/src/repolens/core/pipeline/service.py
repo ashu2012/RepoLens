@@ -14,6 +14,8 @@ from typing import Any
 
 import structlog
 
+from repolens.core.paths import repolens_package_root
+
 logger = structlog.get_logger(__name__)
 
 
@@ -22,6 +24,13 @@ def _registry():
     from repolens.core.persistence import registry
 
     return registry
+
+
+def resolve_index_target(path: str | Path | None = None) -> Path:
+    """Resolve an indexing target without falling back to the caller's cwd."""
+    if path is not None:
+        return Path(path).expanduser().resolve()
+    return repolens_package_root()
 
 
 class IndexingService:
@@ -207,7 +216,7 @@ class IndexingService:
         *,
         session_id: str | None = None,
     ) -> dict[str, Any]:
-        repo, registered = self.ensure_repository(path)
+        repo, registered = self.ensure_repository(resolve_index_target(path))
         job, created = self.start_index(
             repo["id"],
             mode,

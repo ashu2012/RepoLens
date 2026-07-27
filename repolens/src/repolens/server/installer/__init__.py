@@ -153,8 +153,17 @@ def check_ollama_model_available(model: str = "nomic-embed-text") -> bool:
 def ensure_data_directory(base_path: Path | None = None) -> Path:
     """Create the .repolens data directory if it doesn't exist."""
     if base_path is None:
-        base_path = Path.cwd()
-    data_dir = base_path / ".repolens"
+        from repolens.core.paths import repolens_project_root
+
+        source_root = repolens_project_root()
+        if (source_root / "pyproject.toml").is_file():
+            data_dir = source_root / ".repolens"
+        else:
+            from repolens.runtime.bootstrap import RuntimeLocator
+
+            data_dir = RuntimeLocator.default_runtime() / "repositories"
+    else:
+        data_dir = base_path / ".repolens"
     data_dir.mkdir(exist_ok=True)
     (data_dir / "vectors").mkdir(exist_ok=True)
     return data_dir

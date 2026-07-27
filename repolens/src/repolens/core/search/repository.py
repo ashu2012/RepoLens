@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import os
 import math
+import threading
+from collections import OrderedDict
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -11,13 +15,26 @@ from repolens.core.providers.base import MockEmbedder
 from repolens.core.search.bm25 import BM25Index
 
 
+@dataclass(frozen=True)
+class _SearchSnapshot:
+    signature: tuple[int, int]
+    chunks: list[dict[str, Any]]
+    by_id: dict[str, dict[str, Any]]
+    bm25: BM25Index
+    semantic_chunks: list[tuple[str, list[float]]]
+
+
 class RepositorySearch:
+    _cache_lock = threading.RLock()
+    _snapshot_cache: "OrderedDict[Path, _SearchSnapshot]" = OrderedDict()
+    _max_cache_entries = max(1, int(os.environ.get("REPOLENS_SEARCH_CACHE_LIMIT", "8")))
+
     def __init__(self, repo_path: str | Path) -> None:
         self.repo_path = Path(repo_path).resolve()
-        index_path = self.repo_path / ".repolens" / "index.db"
-        if not index_path.exists():
+        self.index_path = self.repo_path / ".repolens" / "index.db"
+        if not self.index_path.exists():
             raise FileNotFoundError(f"Repository is not indexed: {self.repo_path}")
-        self.store = GraphStore(index_path, read_only=True)
+        self.store = GraphStore(self.index_path, read_only=True)
 
     @staticmethod
     def _cosine(left: list[float], right: list[float]) -> float:
@@ -26,17 +43,18 @@ class RepositorySearch:
         denominator = math.sqrt(sum(v * v for v in left)) * math.sqrt(sum(v * v for v in right))
         return sum(a * b for a, b in zip(left, right)) / denominator if denominator else 0.0
 
-    async def search(self, query: str, mode: str = "hybrid", top_k: int = 10) -> list[dict[str, Any]]:
-        if not query.strip():
-            return []
-        if mode == "default" or mode == "auto":
-            mode = "hybrid"
-        if mode not in {"bm25", "semantic", "hybrid"}:
-            raise ValueError("mode must be bm25, semantic, hybrid, or auto")
-        chunks = self.store.load_chunks()
-        if not chunks:
-            return []
+    @staticmethod
+    def _normalize(vector: list[float]) -> list[float]:
+        denominator = math.sqrt(sum(value * value for value in vector))
+        return [value / denominator for value in vector] if denominator else vector
 
+    def _snapshot_signature(self) -> tuple[int, int]:
+        stat = self.index_path.stat()
+        return stat.st_mtime_ns, stat.st_size
+
+    def _build_snapshot(self, signature: tuple[int, int]) -> _SearchSnapshot:
+        chunks = self.store.load_chunks()
+        by_id = {chunk["id"]: chunk for chunk in chunks}
         bm25 = BM25Index()
         bm25.add_documents(
             [
@@ -47,7 +65,58 @@ class RepositorySearch:
                 for chunk in chunks
             ]
         )
-        by_id = {chunk["id"]: chunk for chunk in chunks}
+        semantic_chunks = [
+            (chunk["id"], self._normalize([float(value) for value in chunk["embedding"]]))
+            for chunk in chunks
+            if chunk.get("embedding")
+        ]
+        return _SearchSnapshot(
+            signature=signature,
+            chunks=chunks,
+            by_id=by_id,
+            bm25=bm25,
+            semantic_chunks=semantic_chunks,
+        )
+
+    def _snapshot(self) -> _SearchSnapshot:
+        signature = self._snapshot_signature()
+        with self._cache_lock:
+            cached = self._snapshot_cache.get(self.index_path)
+            if cached and cached.signature == signature:
+                self._snapshot_cache.move_to_end(self.index_path)
+                return cached
+
+        snapshot = self._build_snapshot(signature)
+        with self._cache_lock:
+            cached = self._snapshot_cache.get(self.index_path)
+            if cached and cached.signature == signature:
+                self._snapshot_cache.move_to_end(self.index_path)
+                return cached
+            self._snapshot_cache[self.index_path] = snapshot
+            self._snapshot_cache.move_to_end(self.index_path)
+            while len(self._snapshot_cache) > self._max_cache_entries:
+                self._snapshot_cache.popitem(last=False)
+        return snapshot
+
+    @classmethod
+    def clear_cache(cls) -> None:
+        with cls._cache_lock:
+            cls._snapshot_cache.clear()
+            cls._graph_cache.clear()
+
+    async def search(self, query: str, mode: str = "hybrid", top_k: int = 10) -> list[dict[str, Any]]:
+        if not query.strip():
+            return []
+        if mode == "default" or mode == "auto":
+            mode = "hybrid"
+        if mode not in {"bm25", "semantic", "hybrid"}:
+            raise ValueError("mode must be bm25, semantic, hybrid, or auto")
+        snapshot = self._snapshot()
+        chunks = snapshot.chunks
+        if not chunks:
+            return []
+        bm25 = snapshot.bm25
+        by_id = snapshot.by_id
         rankings: dict[str, float] = {}
         sources: dict[str, set[str]] = {}
         rrf_k = 60
@@ -73,11 +142,12 @@ class RepositorySearch:
                     query_vector = []
             else:
                 query_vector = (await MockEmbedder().embed([query]))[0]
+            query_vector = self._normalize([float(value) for value in query_vector])
             semantic = (
                 sorted(
                     (
-                        (chunk["id"], self._cosine(query_vector, chunk["embedding"]))
-                        for chunk in chunks if chunk["embedding"]
+                        (chunk_id, sum(a * b for a, b in zip(query_vector, chunk_vec)))
+                        for chunk_id, chunk_vec in snapshot.semantic_chunks
                     ),
                     key=lambda item: item[1],
                     reverse=True,
@@ -109,6 +179,37 @@ class RepositorySearch:
 
     def symbols(self, name: str, kind: str | None = None, limit: int = 50) -> list[dict]:
         return self.store.find_symbols(name, kind=kind, limit=limit)
+
+    def graph(self) -> nx.DiGraph:
+        return self._graph_snapshot().graph
+
+    @dataclass(frozen=True)
+    class _GraphSnapshot:
+        signature: tuple[int, int]
+        graph: Any
+
+    _graph_cache: "OrderedDict[Path, _GraphSnapshot]" = OrderedDict()
+
+    def _graph_snapshot(self) -> _GraphSnapshot:
+        signature = self._snapshot_signature()
+        with self._cache_lock:
+            cached = self._graph_cache.get(self.index_path)
+            if cached and cached.signature == signature:
+                self._graph_cache.move_to_end(self.index_path)
+                return cached
+
+        graph = self.store.load_graph()
+        snapshot = self._GraphSnapshot(signature=signature, graph=graph)
+        with self._cache_lock:
+            cached = self._graph_cache.get(self.index_path)
+            if cached and cached.signature == signature:
+                self._graph_cache.move_to_end(self.index_path)
+                return cached
+            self._graph_cache[self.index_path] = snapshot
+            self._graph_cache.move_to_end(self.index_path)
+            while len(self._graph_cache) > self._max_cache_entries:
+                self._graph_cache.popitem(last=False)
+        return snapshot
 
     def context_targets(self, targets: list[str]) -> list[dict]:
         found: dict[str, dict] = {}

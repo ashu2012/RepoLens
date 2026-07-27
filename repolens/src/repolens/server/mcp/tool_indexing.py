@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any
 
 from repolens.core.pipeline.service import indexing_service
+from repolens.core.pipeline.service import resolve_index_target
 
 from .server import mcp, state
 
@@ -19,9 +19,10 @@ async def index_current_directory(
 
     The default ``auto`` mode performs a full index when no durable index exists
     and an incremental index otherwise. The call returns immediately with a job
-    ID; use ``get_index_status`` to monitor it.
+    ID; use ``get_index_status`` to monitor it. If ``path`` is omitted, RepoLens
+    indexes its own package directory instead of the server process cwd.
     """
-    target = Path(path).expanduser().resolve() if path else Path.cwd().resolve()
+    target = resolve_index_target(path)
     return await state.run_sync(indexing_service.index_directory, target, mode)
 
 

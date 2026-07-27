@@ -18,6 +18,22 @@ def _replace_registry(monkeypatch, registry):
     monkeypatch.setattr(persistence_package, "registry", registry)
 
 
+def test_default_data_dir_uses_runtime_repositories(monkeypatch):
+    monkeypatch.delenv("REPOLENS_DATA_DIR", raising=False)
+    from repolens.core.persistence.registry import default_data_dir
+    from repolens.core.paths import repolens_project_root
+
+    assert default_data_dir() == repolens_project_root() / ".repolens" / "repositories"
+
+
+def test_resolve_index_target_without_path_uses_package_root(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    from repolens.core.paths import repolens_package_root
+    from repolens.core.pipeline.service import resolve_index_target
+
+    assert resolve_index_target() == repolens_package_root()
+
+
 def test_indexing_service_registers_and_persists_job(tmp_path, monkeypatch):
     from repolens.core.persistence.registry import RegistryStore
     from repolens.core.pipeline.service import IndexingService
@@ -76,6 +92,65 @@ async def test_mcp_index_current_directory_returns_async_job(tmp_path, monkeypat
     assert payload["status"] == "indexing_started"
     assert job["status"] == "completed"
     assert status_result.structured_content["status"] == "completed"
+
+
+@pytest.mark.asyncio
+async def test_repository_search_reuses_cached_snapshot(tmp_path, monkeypatch):
+    from repolens.core.graph.store import GraphStore
+    from repolens.core.pipeline.service import IndexingService
+    from repolens.core.search.repository import RepositorySearch
+
+    repository = tmp_path / "cache-workspace"
+    repository.mkdir()
+    (repository / "searchable.py").write_text(
+        "def lookup(value):\n    return value.strip().lower()\n",
+        encoding="utf-8",
+    )
+    service = IndexingService(index_workers=1, poll_interval=0.01)
+    result = service.index_directory(repository)
+    assert service.wait(result["job_id"], timeout=30)["status"] == "completed"
+    service.stop_runtime()
+
+    RepositorySearch.clear_cache()
+    load_calls = 0
+    original_load_chunks = GraphStore.load_chunks
+
+    def wrapped_load_chunks(self):
+        nonlocal load_calls
+        load_calls += 1
+        return original_load_chunks(self)
+
+    monkeypatch.setattr(GraphStore, "load_chunks", wrapped_load_chunks)
+    search = RepositorySearch(repository)
+
+    first = await search.search("lookup", mode="hybrid", top_k=3)
+    second = await RepositorySearch(repository).search("lookup", mode="hybrid", top_k=3)
+
+    assert first
+    assert second
+    assert load_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_mcp_index_current_directory_without_path_uses_repo_package_root(monkeypatch, tmp_path):
+    from repolens.core.paths import repolens_package_root
+    from repolens.server.mcp import tool_indexing
+
+    monkeypatch.chdir(tmp_path)
+    captured: dict[str, object] = {}
+
+    async def fake_run_sync(function, *args, **kwargs):
+        captured["function"] = function
+        captured["args"] = args
+        captured["kwargs"] = kwargs
+        return {"status": "indexing_started", "job_id": "job-1"}
+
+    monkeypatch.setattr(tool_indexing.state, "run_sync", fake_run_sync)
+
+    result = await tool_indexing.index_current_directory()
+
+    assert result["job_id"] == "job-1"
+    assert captured["args"][0] == repolens_package_root()
 
 
 def test_openapi_bridge_indexes_current_directory(tmp_path, monkeypatch):

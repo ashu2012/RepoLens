@@ -26,8 +26,10 @@ The generated `dist` application includes Python and dashboard assets. Use it
 as the payload for WiX (Windows), a signed DMG/PKG (macOS), or
 DEB/RPM/AppImage tooling (Linux). The installer runs `RepoLens start` as
 its finish action, which automatically initializes the runtime (if needed),
-starts the server, and opens `http://127.0.0.1:38451/dashboard` in the
-default browser. The console window stays open until the user presses Ctrl+C.
+streams server logs in the console, and opens
+`http://127.0.0.1:38451/dashboard` in the default browser once the server is
+ready. The console window stays open and ends with a clear ready banner until
+the user presses Ctrl+C.
 
 RepoLens never edits an AI client's configuration. Obtain snippets from
 `RepoLens mcp-config CLIENT` or

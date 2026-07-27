@@ -6,8 +6,9 @@ Open the [latest RepoLens release](https://github.com/ashu2012/RepoLens/releases
 and download one of:
 
 - `RepoLens-<version>-Setup-x64.exe` — recommended installer. It installs
-  RepoLens under Program Files, initializes the user runtime, starts the daemon,
-  creates shortcuts, and offers to open the dashboard.
+  RepoLens under Program Files, initializes the user runtime, starts the server,
+  streams logs in the console, creates shortcuts, and opens the dashboard once
+  the server is ready.
 - `RepoLens.exe` — portable executable. Run `RepoLens.exe init` once, followed
   by `RepoLens.exe daemon`.
 - `SHA256SUMS.txt` — checksums for verifying both downloads.
