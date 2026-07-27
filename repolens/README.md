@@ -22,7 +22,7 @@
 | **🌲 AST Parsing** | Tree-sitter powered parsing for 15+ languages |
 | **🔗 Knowledge Graph** | NetworkX call/import/inheritance graph with community detection |
 | **🔎 Hybrid Search** | BM25 + vector (LanceDB) + graph-neighbor reranking |
-| **🤖 MCP Server** | 15 tools exposed via FastMCP (stdio + HTTP) |
+| **🤖 MCP Server** | 20 tools exposed via FastMCP (stdio + HTTP) |
 | **💰 Token Reduction** | 80-95% savings via skeleton generation + context distillation |
 | **⏰ Cron Indexing** | APScheduler-based incremental (*/15m) and full (daily) indexing |
 | **📊 Observability** | Prometheus metrics + self-hosted HTML dashboard |
@@ -45,7 +45,7 @@ RepoLens was designed by studying 8 leading open-source projects in the code int
 | **Knowledge Graph** | ✅ NetworkX | ✅ Dependency | ✅ AST Graph | ✅ NetworkX | ✅ OKF Concept | ❌ | ❌ | ❌ | ✅ C4 Model |
 | **Community Detection** | ✅ Leiden | ✅ Leiden | ✅ Leiden | ✅ Leiden | ❌ | ❌ | ❌ | ❌ | ❌ |
 | **Hub/Bridge Analysis** | ✅ | ❌ | ✅ | ✅ God nodes | ❌ | ❌ | ❌ | ❌ | ❌ |
-| **MCP Server** | ✅ 15 tools | ✅ 10 tools | ✅ FastMCP | ✅ Optional | ✅ | ✅ 104 tools | ❌ | ✅ Plugin | ✅ |
+| **MCP Server** | ✅ 20 tools | ✅ 10 tools | ✅ FastMCP | ✅ Optional | ✅ | ✅ 104 tools | ❌ | ✅ Plugin | ✅ |
 | **Token Reduction** | ✅ 80-95% | ✅ Up to 96% | ✅ 82x median | ✅ High | ✅ Budget | ✅ 15-95% | ❌ Tracks only | ✅ Chunked | ❌ |
 | **Skeleton Generation** | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | **Blast Radius** | ✅ 2-hop | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
@@ -237,8 +237,9 @@ the current workspace if it already has an index, then the RepoLens install/proj
 that repo is indexed, and then the most recently indexed repository. You can pin the default
 with `REPOLENS_DEFAULT_REPO_ID` or `REPOLENS_WORKSPACE` when you want a fixed startup context.
 For agent workflows, use `switch_working_repository` to choose a project, then `index_repository`
-or `reindex_repository` to build or rebuild it on demand. `get_working_repository` shows the
-current session selection.
+or `reindex_repository` to build or rebuild it on demand. `cleanup_staging_artifacts` removes
+stale staging copies for the active repo or every idle repo, and `get_working_repository` shows
+the current session selection.
 
 ### Available Tools
 
@@ -261,6 +262,7 @@ current session selection.
 | `switch_working_repository` | Activate a repository or project directory for this session |
 | `index_repository` | Select and queue an index job for a repository |
 | `reindex_repository` | Force a full or incremental rebuild for a repository |
+| `cleanup_staging_artifacts` | Remove leftover staging copies and reclaim disk space |
 | `index_current_directory` | Register the workspace and start an async index |
 | `get_index_status` | Monitor a durable asynchronous index job |
 
@@ -269,6 +271,11 @@ persists its latest activity and schedules an incremental index 10 minutes after
 tool call. Continued activity postpones the run. Index builds now happen on a local staging copy
 and publish by hot swap when complete, so reads keep using the last known-good index while the new
 one is being built.
+
+RepoLens also skips generated trees like `.venv*`, `dist`, `build`, `node_modules`, and the
+internal `.repolens` metadata directory during discovery, so repository counts stay source-only.
+Published indexes are copied into the canonical `.repolens/index.db` path and staging trees are
+removed automatically after a job finishes.
 
 ## ⏰ Cron Schedule
 
@@ -327,7 +334,7 @@ repolens/
 │   │   ├── distill/      # Skeleton, context builder, token budget
 │   │   └── pipeline/     # Orchestrator, incremental, checkpoint
 │   ├── server/
-│   │   ├── mcp/          # FastMCP tools (15 tools)
+│   │   ├── mcp/          # FastMCP tools (20 tools)
 │   │   ├── api/          # REST API routes
 │   │   ├── installer/    # Auto-installer
 │   │   ├── app.py        # FastAPI factory

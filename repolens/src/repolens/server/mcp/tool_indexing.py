@@ -7,6 +7,7 @@ from typing import Any
 
 from repolens.core.pipeline.service import indexing_service
 from repolens.core.pipeline.service import resolve_index_target
+from repolens.core.paths import repolens_cleanup_staging_indexes
 from repolens.core.paths import repolens_current_index_path
 
 from .server import mcp, state
@@ -120,6 +121,64 @@ async def reindex_repository(
 ) -> dict[str, Any]:
     """Force a full or incremental rebuild for the selected repository."""
     return await index_repository(repo_id=repo_id, path=path, mode=mode, register=register)
+
+
+@mcp.tool()
+async def cleanup_staging_artifacts(
+    repo_id: str | None = None,
+    path: str | None = None,
+    all_repos: bool = False,
+) -> dict[str, Any]:
+    """Remove staging copies for one repository or every idle repository."""
+
+    def load() -> dict[str, Any]:
+        from repolens.core.persistence import registry
+
+        if all_repos:
+            if repo_id is not None or path is not None:
+                raise ValueError("all_repos cannot be combined with repo_id or path")
+            removed = indexing_service.prune_staging_artifacts()
+            return {
+                "status": "cleanup_completed",
+                "scope": "all_repositories",
+                "removed": removed,
+                "session_id": state.session_id(),
+            }
+
+        if path is not None:
+            target = Path(path).expanduser().resolve()
+            if not target.exists():
+                raise ValueError(f"Path does not exist: {target}")
+            if not target.is_dir():
+                raise ValueError(f"Path is not a directory: {target}")
+            removed = repolens_cleanup_staging_indexes(target)
+            return {
+                "status": "cleanup_completed",
+                "scope": "path",
+                "removed": removed,
+                "local_path": str(target),
+                "repo_id": repo_id,
+                "session_id": state.session_id(),
+            }
+
+        if repo_id is not None:
+            repo = registry.get_repo(repo_id)
+            if repo is None:
+                raise ValueError(f"Unknown repository: {repo_id}")
+        else:
+            repo = state.active_repository()
+            if repo is None:
+                raise ValueError("No repository is available to clean up")
+
+        removed = repolens_cleanup_staging_indexes(repo["local_path"])
+        return {
+            "status": "cleanup_completed",
+            "scope": "repository",
+            "removed": removed,
+            **_repo_payload(repo),
+        }
+
+    return await state.run_sync(load)
 
 
 @mcp.tool()

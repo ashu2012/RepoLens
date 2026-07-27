@@ -13,6 +13,7 @@ from typing import Callable
 
 import structlog
 
+from repolens.core.discovery import iter_indexable_files
 from repolens.core.paths import repolens_architecture_snapshot_path
 from repolens.core.paths import repolens_current_index_path
 
@@ -41,8 +42,6 @@ class PipelineResult:
 class PipelineOrchestrator:
     """Build and update repository-local AST, graph, chunk, and vector indexes."""
 
-    IGNORED_DIRS = {".git", ".repolens", "node_modules", "__pycache__", ".venv", "venv"}
-
     @staticmethod
     def _hash(path: Path) -> str:
         digest = hashlib.sha256()
@@ -68,12 +67,7 @@ class PipelineOrchestrator:
 
     def _discover(self, root: Path, parser) -> list[Path]:
         return sorted(
-            (
-                path for path in root.rglob("*")
-                if path.is_file()
-                and not self.IGNORED_DIRS.intersection(path.parts)
-                and path.suffix.lower() in parser.SUPPORTED_EXTENSIONS
-            ),
+            iter_indexable_files(root, parser.SUPPORTED_EXTENSIONS),
             key=lambda path: path.as_posix(),
         )
 

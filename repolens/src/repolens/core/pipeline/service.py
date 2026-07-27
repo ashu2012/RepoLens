@@ -14,9 +14,11 @@ from typing import Any
 
 import structlog
 
+from repolens.core.discovery import count_indexable_files
 from repolens.core.graph.store import GraphStore
 from repolens.core.paths import (
     repolens_current_index_path,
+    repolens_cleanup_staging_indexes,
     repolens_package_root,
     repolens_publish_active_index,
     repolens_staging_index_path,
@@ -90,6 +92,10 @@ class IndexingService:
     def start_runtime(self) -> None:
         """Start recovery and delayed-session dispatch in a daemon thread."""
         self._ensure_executor()
+        try:
+            self.prune_staging_artifacts()
+        except Exception:
+            logger.exception("staging_cleanup_failed_on_startup")
         with self._lock:
             if self._dispatcher and self._dispatcher.is_alive():
                 return
@@ -207,12 +213,9 @@ class IndexingService:
         if existing:
             return existing, False
 
-        ignored = {".git", ".repolens", "__pycache__", "node_modules", ".venv", "venv"}
-        files_count = sum(
-            1
-            for candidate in root.rglob("*")
-            if candidate.is_file() and not ignored.intersection(candidate.parts)
-        )
+        from repolens.core.ingestion.parser import CodeParser
+
+        files_count = count_indexable_files(root, CodeParser.SUPPORTED_EXTENSIONS)
         index_exists = self._active_index_path(root) is not None
         repo = store.add_repo(
             {
@@ -312,6 +315,7 @@ class IndexingService:
             )
             return
         started_at = time.time()
+        staging_dir = self._staging_index_path(repo["local_path"], job_id).parent
 
         def progress(phase: str, percentage: int) -> None:
             persisted = store.get_job(job_id)
@@ -409,6 +413,15 @@ class IndexingService:
             )
             store.update_repo(repo["id"], status="error")
             logger.exception("index_job_failed", job_id=job_id, repo_path=repo["local_path"])
+        finally:
+            try:
+                repolens_cleanup_staging_indexes(repo["local_path"])
+            except Exception:
+                logger.exception(
+                    "staging_cleanup_failed",
+                    repo_path=repo["local_path"],
+                    staging_dir=str(staging_dir),
+                )
 
     def record_mcp_activity(
         self,
@@ -468,6 +481,21 @@ class IndexingService:
                     repo_id=repo_id,
                 )
         return queued
+
+    def prune_staging_artifacts(self) -> int:
+        """Remove stale staging trees for idle repositories."""
+        store = _registry()
+        removed = 0
+        active_repo_ids = {
+            job["repo_id"]
+            for job in store.list_jobs()
+            if job["status"] in {"queued", "running"}
+        }
+        for repo in store.list_repos():
+            if repo["id"] in active_repo_ids:
+                continue
+            removed += repolens_cleanup_staging_indexes(repo["local_path"])
+        return removed
 
 
 indexing_service = IndexingService()

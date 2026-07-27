@@ -347,7 +347,7 @@ async def test_mcp_search_and_context_tools_use_persisted_index(tmp_path, monkey
     monkeypatch.setattr(persistence_package, "registry", durable_registry)
 
     names = {tool.name for tool in await mcp.list_tools()}
-    assert {"search_semantic", "search_symbols", "get_context", "get_health"} <= names
+    assert {"search_semantic", "search_symbols", "get_context", "get_health", "reindex_repository", "cleanup_staging_artifacts"} <= names
     search_result = await mcp.call_tool(
         "search_symbols", {"name": "lookup_product", "repo_id": "catalog"}
     )
@@ -357,3 +357,8 @@ async def test_mcp_search_and_context_tools_use_persisted_index(tmp_path, monkey
         {"targets": ["lookup_product"], "budget": 200, "repo_id": "catalog"},
     )
     assert "def lookup_product" in str(context_result)
+    cleanup_result = await mcp.call_tool(
+        "cleanup_staging_artifacts",
+        {"repo_id": "catalog"},
+    )
+    assert "cleanup_completed" in str(cleanup_result)

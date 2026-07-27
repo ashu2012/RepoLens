@@ -140,18 +140,29 @@ def test_indexing_service_registers_and_persists_job(tmp_path, monkeypatch):
         "def available_stock(items):\n    return sum(items)\n",
         encoding="utf-8",
     )
+    (repository / ".venv-release").mkdir()
+    (repository / ".venv-release" / "ignored.py").write_text("value = 1\n", encoding="utf-8")
+    (repository / "dist").mkdir()
+    (repository / "dist" / "bundle.py").write_text("value = 2\n", encoding="utf-8")
     registry_path = tmp_path / "data" / "registry.db"
     durable_registry = RegistryStore(registry_path)
     _replace_registry(monkeypatch, durable_registry)
     service = IndexingService(index_workers=2, poll_interval=0.01)
 
+    repo, registered = service.ensure_repository(repository)
     result = service.index_directory(repository)
     job = service.wait(result["job_id"], timeout=30)
 
-    assert result["registered"] is True
+    assert registered is True
+    assert repo["files_count"] == 1
+    assert result["registered"] is False
     assert job["status"] == "completed"
-    assert repolens_current_index_path(repository) is not None
+    assert repolens_current_index_path(repository) == repository / ".repolens" / "index.db"
     assert repolens_active_index_pointer(repository).exists()
+    assert Path(repolens_active_index_pointer(repository).read_text(encoding="utf-8").strip()) == (
+        repository / ".repolens" / "index.db"
+    )
+    assert not (repository / ".repolens" / "staging").exists()
     reopened = RegistryStore(registry_path)
     assert reopened.get_repo(result["repo_id"])["status"] == "indexed"
     assert reopened.get_job(result["job_id"])["status"] == "completed"
@@ -342,6 +353,92 @@ async def test_mcp_index_current_directory_without_path_uses_repo_package_root(m
 
     assert result["job_id"] == "job-1"
     assert captured["args"][0] == repolens_package_root()
+
+
+@pytest.mark.asyncio
+async def test_cleanup_staging_artifacts_tool_removes_repository_staging(tmp_path, monkeypatch):
+    from repolens.core.persistence.registry import RegistryStore
+    from repolens.core.paths import repolens_staging_index_path
+    from repolens.server.mcp import tool_indexing
+
+    repository = tmp_path / "cleanup-project"
+    repository.mkdir()
+    (repository / "cleanup.py").write_text("def cleanup():\n    return True\n", encoding="utf-8")
+    durable_registry = RegistryStore(tmp_path / "data" / "registry.db")
+    _replace_registry(monkeypatch, durable_registry)
+    repo = durable_registry.add_repo(
+        {
+            "id": "cleanup-repo",
+            "name": "cleanup-project",
+            "local_path": str(repository),
+            "status": "indexed",
+            "files_count": 1,
+            "is_git": False,
+            "created_at": 1.0,
+            "last_indexed": 1.0,
+        }
+    )
+    staging = repolens_staging_index_path(repository, "job-cleanup").parent
+    staging.mkdir(parents=True, exist_ok=True)
+    (staging / "index.db").write_text("stale", encoding="utf-8")
+
+    cleaned = await tool_indexing.cleanup_staging_artifacts(repo_id=repo["id"])
+
+    assert cleaned["status"] == "cleanup_completed"
+    assert cleaned["scope"] == "repository"
+    assert cleaned["removed"] == 1
+    assert not staging.exists()
+
+
+def test_prune_staging_artifacts_removes_stale_builds(tmp_path, monkeypatch):
+    from repolens.core.persistence.registry import RegistryStore
+    from repolens.core.pipeline.service import IndexingService
+    from repolens.core.paths import repolens_staging_index_path
+
+    repo_one = tmp_path / "repo-one"
+    repo_two = tmp_path / "repo-two"
+    repo_one.mkdir()
+    repo_two.mkdir()
+    (repo_one / "src.py").write_text("value = 1\n", encoding="utf-8")
+    (repo_two / "src.py").write_text("value = 2\n", encoding="utf-8")
+    durable_registry = RegistryStore(tmp_path / "data" / "registry.db")
+    _replace_registry(monkeypatch, durable_registry)
+    repo_one_entry = durable_registry.add_repo(
+        {
+            "id": "repo-one",
+            "name": "repo-one",
+            "local_path": str(repo_one),
+            "status": "indexed",
+            "files_count": 1,
+            "is_git": False,
+            "created_at": 1.0,
+            "last_indexed": 1.0,
+        }
+    )
+    durable_registry.add_repo(
+        {
+            "id": "repo-two",
+            "name": "repo-two",
+            "local_path": str(repo_two),
+            "status": "indexed",
+            "files_count": 1,
+            "is_git": False,
+            "created_at": 2.0,
+            "last_indexed": 2.0,
+        }
+    )
+    for repo in (repo_one, repo_two):
+        staging = repolens_staging_index_path(repo, "old-job").parent
+        staging.mkdir(parents=True, exist_ok=True)
+        (staging / "index.db").write_text("stale", encoding="utf-8")
+
+    service = IndexingService(index_workers=1, poll_interval=0.01)
+    removed = service.prune_staging_artifacts()
+    service.stop_runtime()
+
+    assert removed == 2
+    assert not (repo_one / ".repolens" / "staging").exists()
+    assert not (repo_two / ".repolens" / "staging").exists()
 
 
 @pytest.mark.asyncio

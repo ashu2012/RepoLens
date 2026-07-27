@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import os
+import shutil
+import gc
+import time
 from pathlib import Path
 
 
@@ -24,6 +27,16 @@ def repolens_versioned_index_root(repo_root: str | Path) -> Path:
 def repolens_staging_index_path(repo_root: str | Path, build_id: str) -> Path:
     """Return a staging path for a fresh index build."""
     return repolens_index_dir(repo_root) / "staging" / build_id / "index.db"
+
+
+def repolens_staging_root(repo_root: str | Path) -> Path:
+    """Return the root directory that contains per-build staging copies."""
+    return repolens_index_dir(repo_root) / "staging"
+
+
+def repolens_published_index_path(repo_root: str | Path) -> Path:
+    """Return the canonical durable index path for a repository."""
+    return repolens_index_dir(repo_root) / "index.db"
 
 
 def repolens_architecture_snapshot_path(repo_root: str | Path) -> Path:
@@ -68,17 +81,46 @@ def repolens_current_index_path(repo_root: str | Path) -> Path | None:
 
 
 def repolens_publish_active_index(repo_root: str | Path, index_path: str | Path) -> Path:
-    """Atomically publish a staged index by updating the active pointer file."""
+    """Atomically publish a staged index to the canonical path and update the pointer."""
     root = Path(repo_root).expanduser().resolve()
     target = Path(index_path).expanduser().resolve()
+    published = repolens_published_index_path(root)
     pointer = repolens_active_index_pointer(root)
+    from repolens.core.graph.store import GraphStore
+
+    published.parent.mkdir(parents=True, exist_ok=True)
+    source_store = GraphStore(target, read_only=True)
+    destination_store = GraphStore(published)
+    with source_store._connect() as source, destination_store._connect() as destination:
+        source.backup(destination)
+    del source_store, destination_store
+
     pointer.parent.mkdir(parents=True, exist_ok=True)
     tmp_pointer = pointer.with_name(
-        f"{pointer.name}.{os.getpid()}.{target.stat().st_mtime_ns}.tmp"
+        f"{pointer.name}.{os.getpid()}.{published.stat().st_mtime_ns}.tmp"
     )
-    tmp_pointer.write_text(str(target), encoding="utf-8")
+    tmp_pointer.write_text(str(published), encoding="utf-8")
     os.replace(tmp_pointer, pointer)
-    return target
+    return published
+
+
+def repolens_cleanup_staging_indexes(repo_root: str | Path) -> int:
+    """Delete leftover staging copies for a repository."""
+    staging_root = repolens_staging_root(repo_root)
+    if not staging_root.exists():
+        return 0
+    removed = sum(1 for child in staging_root.iterdir() if child.is_dir())
+    gc.collect()
+    for attempt in range(8):
+        try:
+            shutil.rmtree(staging_root)
+            return removed
+        except PermissionError:
+            if attempt == 7:
+                break
+            time.sleep(0.05 * (attempt + 1))
+    shutil.rmtree(staging_root, ignore_errors=True)
+    return removed
 
 
 def repolens_package_root() -> Path:

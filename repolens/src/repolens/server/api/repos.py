@@ -11,6 +11,7 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
+from repolens.core.discovery import count_indexable_files
 from repolens.core.pipeline.service import indexing_service
 from repolens.core.persistence import registry
 
@@ -33,11 +34,9 @@ class RepoResponse(BaseModel):
 
 
 def _count_files(root: Path) -> int:
-    ignored = {".git", ".repolens", "__pycache__", "node_modules", ".venv", "venv"}
-    return sum(
-        1 for path in root.rglob("*")
-        if path.is_file() and not ignored.intersection(path.parts)
-    )
+    from repolens.core.ingestion.parser import CodeParser
+
+    return count_indexable_files(root, CodeParser.SUPPORTED_EXTENSIONS)
 
 
 @router.post("", response_model=RepoResponse)
