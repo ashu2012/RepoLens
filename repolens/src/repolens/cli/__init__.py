@@ -157,6 +157,81 @@ def daemon(runtime_dir: str | None, foreground: bool) -> None:
 
 
 @cli.command()
+@click.option("--host", default="127.0.0.1", help="Host to bind the server to")
+@click.option("--port", "-p", default=38451, type=int, help="Port to bind the server to")
+@click.option("--no-open", is_flag=True, help="Do not open the dashboard in a browser")
+@click.option("--runtime-dir", type=click.Path(file_okay=False), help="Custom runtime directory")
+def start(host: str, port: int, no_open: bool, runtime_dir: str | None) -> None:
+    """Start RepoLens server and open the dashboard.
+
+    Runs the RepoLens HTTP API server in the foreground, keeping this console
+    window open. Opens the dashboard in your default browser automatically.
+    Press Ctrl+C to stop the server and close the window.
+    """
+    import uvicorn
+    from repolens.runtime.bootstrap import BootstrapOptions, RepoLensBootstrap, RuntimeLocator
+
+    # Initialize runtime if not already initialized
+    runtime = Path(runtime_dir).expanduser() if runtime_dir else RuntimeLocator.default_runtime()
+    if not (runtime / "config.yaml").exists():
+        console.print("[yellow]RepoLens runtime not initialized. Running initialization...[/]")
+        bootstrap = RepoLensBootstrap(runtime)
+        bootstrap.initialize(
+            BootstrapOptions(
+                runtime_dir=runtime,
+                auto_start=False,
+                max_cache_size=5,
+                cpu_profile="high",
+                telemetry=False,
+            ),
+            force=False,
+        )
+        console.print("[green]✓[/] RepoLens runtime initialized")
+
+    # Check if daemon is already running (from a previous background launch)
+    from repolens.runtime.ipc import IPCClient
+    if IPCClient(runtime).ping():
+        url = f"http://{host}:{port}/dashboard"
+        console.print("[green]✓[/] RepoLens daemon is already running.")
+        console.print(f"[bold]Dashboard:[/] {url}")
+        if not no_open:
+            webbrowser.open(url)
+        return
+
+    url = f"http://{host}:{port}/dashboard"
+    console.print()
+    console.print(Panel.fit(
+        f"[bold cyan]RepoLens Server[/]\n\n"
+        f"[green]Dashboard:[/]  {url}\n"
+        f"[green]API Docs:[/]   http://{host}:{port}/api/docs\n"
+        f"[yellow]Status:[/]     Server starting...\n\n"
+        f"[dim]Press [bold]Ctrl+C[/bold] to stop the server[/]",
+        title="📊 RepoLens",
+        border_style="cyan",
+    ))
+    console.print()
+
+    if not no_open:
+        # Small delay to let server start before opening browser
+        import threading
+        def _open_browser() -> None:
+            import time as _time
+            _time.sleep(2)
+            webbrowser.open(url)
+        threading.Thread(target=_open_browser, daemon=True).start()
+
+    try:
+        uvicorn.run("repolens.server.app:create_app", host=host, port=port, factory=True, log_level="info")
+    except KeyboardInterrupt:
+        console.print()
+        console.print("[yellow]RepoLens server stopped.[/]")
+        console.print("[dim]You may close this window.[/]")
+        # Small pause so the user can read the message before window closes
+        import time as _time
+        _time.sleep(2)
+
+
+@cli.command()
 @click.option("--no-open", is_flag=True)
 def dashboard(no_open: bool) -> None:
     """Open the local dashboard."""

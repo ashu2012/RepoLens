@@ -101,12 +101,12 @@ bundles include Python; end users do not need to install Python.
 ### Installed application lifecycle
 
 ```bash
-repolens init
-repolens init --wizard
-repolens daemon
-repolens dashboard
-repolens status
-repolens diagnostics
+repolens start          # Initialize (if needed), start server, and open dashboard
+repolens init           # Initialize runtime only
+repolens init --wizard  # Interactive initialization
+repolens daemon         # Start background daemon (headless)
+repolens status         # Show runtime and daemon status
+repolens diagnostics    # Run installation and dependency diagnostics
 ```
 
 Runtime state is user-scoped: `%LOCALAPPDATA%\RepoLens` on Windows,
@@ -126,7 +126,13 @@ repolens init /path/to/your/repo
 repolens add /path/to/your/repo
 repolens index /path/to/your/repo
 
-# Start server with dashboard
+# Start RepoLens (initializes, starts server, opens dashboard)
+repolens start
+# → Dashboard: http://localhost:38451/dashboard
+# → API Docs:  http://localhost:38451/api/docs
+# → Server stays open until Ctrl+C
+
+# Or start server only (without opening dashboard)
 repolens serve
 # → Dashboard: http://localhost:38451/dashboard
 # → API Docs:  http://localhost:38451/api/docs
@@ -134,10 +140,54 @@ repolens serve
 # Or use as MCP server (for AI coding tools)
 repolens mcp
 
-
 ```
-## build release
-packaging\README.md
+## Build EXE & Installer
+
+Build a standalone Windows executable and installer from source:
+
+### Prerequisites
+
+- Python 3.11+
+- Windows 10/11 (ARM64 via x64 emulation)
+
+### Build Portable EXE
+
+```bash
+# Install build tool
+python -m pip install nuitka
+
+# Build portable executable (output: dist/RepoLens.exe)
+python packaging/build.py
+```
+
+### Build Windows Installer
+
+```powershell
+# Install Inno Setup (one time)
+winget install --exact --id JRSoftware.InnoSetup
+
+# Build portable EXE + installer (output: dist/RepoLens-{version}-Setup-x64.exe)
+.\packaging\windows\build-windows.ps1 -Version 0.2.0 -Python python
+
+# With custom Inno Setup path
+.\packaging\windows\build-windows.ps1 `
+  -Version 0.2.0 `
+  -Python python `
+  -Iscc "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+```
+
+The generated `dist\` folder contains:
+- `RepoLens.exe` — Portable standalone executable
+- `RepoLens-{version}-Setup-x64.exe` — Windows installer (includes Python runtime)
+
+After installation, launch RepoLens via Start Menu or run:
+```bash
+RepoLens start
+```
+
+The `start` command initializes the runtime (if needed), starts the server, and opens the dashboard — all in a single step. Press **Ctrl+C** to stop.
+
+For full build details, see [packaging/README.md](packaging/README.md).
 
 ## 🏗️ Architecture
 
