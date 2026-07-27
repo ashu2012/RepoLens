@@ -37,6 +37,7 @@ def test_resolve_index_target_without_path_uses_package_root(tmp_path, monkeypat
 def test_indexing_service_registers_and_persists_job(tmp_path, monkeypatch):
     from repolens.core.persistence.registry import RegistryStore
     from repolens.core.pipeline.service import IndexingService
+    from repolens.core.paths import repolens_current_index_path, repolens_active_index_pointer
 
     repository = tmp_path / "project"
     repository.mkdir()
@@ -54,7 +55,8 @@ def test_indexing_service_registers_and_persists_job(tmp_path, monkeypatch):
 
     assert result["registered"] is True
     assert job["status"] == "completed"
-    assert (repository / ".repolens" / "index.db").exists()
+    assert repolens_current_index_path(repository) is not None
+    assert repolens_active_index_pointer(repository).exists()
     reopened = RegistryStore(registry_path)
     assert reopened.get_repo(result["repo_id"])["status"] == "indexed"
     assert reopened.get_job(result["job_id"])["status"] == "completed"
@@ -129,6 +131,40 @@ async def test_repository_search_reuses_cached_snapshot(tmp_path, monkeypatch):
     assert first
     assert second
     assert load_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_get_health_uses_active_index_when_repo_is_indexing(monkeypatch):
+    from repolens.server.mcp import tool_health
+
+    repo = {
+        "id": "repo-1",
+        "status": "indexing",
+        "last_indexed": 123.0,
+    }
+
+    monkeypatch.setattr(tool_health.state, "repository", lambda repo_id=None: repo)
+    class FakeIndex:
+        def stats(self):
+            return {"total_nodes": 1, "total_edges": 2, "total_chunks": 3, "total_vectors": 1, "total_files": 1}
+
+    called = {"value": False}
+
+    def fake_index(*args, **kwargs):
+        called["value"] = True
+        return FakeIndex()
+
+    monkeypatch.setattr(tool_health.state, "index", fake_index)
+
+    result = await tool_health.get_health("repo-1")
+    payload = json.loads(result)
+
+    assert payload["repo_id"] == "repo-1"
+    assert payload["status"] == "indexing"
+    assert payload["ready"] is False
+    assert payload["total_nodes"] == 1
+    assert payload["total_files"] == 1
+    assert called["value"] is True
 
 
 @pytest.mark.asyncio

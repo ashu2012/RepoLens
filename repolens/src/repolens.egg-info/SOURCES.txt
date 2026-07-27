@@ -12,6 +12,7 @@ src/repolens/cli/__init__.py
 src/repolens/cli/main.py
 src/repolens/core/__init__.py
 src/repolens/core/config.py
+src/repolens/core/paths.py
 src/repolens/core/distill/__init__.py
 src/repolens/core/distill/budget.py
 src/repolens/core/distill/context_builder.py

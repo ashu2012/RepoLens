@@ -2,7 +2,78 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
+
+
+def repolens_index_dir(repo_root: str | Path) -> Path:
+    """Return the repository-local RepoLens metadata directory."""
+    return Path(repo_root).expanduser().resolve() / ".repolens"
+
+
+def repolens_active_index_pointer(repo_root: str | Path) -> Path:
+    """Return the pointer file that names the active durable index."""
+    return repolens_index_dir(repo_root) / "index.active"
+
+
+def repolens_versioned_index_root(repo_root: str | Path) -> Path:
+    """Return the directory that stores published and staged index versions."""
+    return repolens_index_dir(repo_root) / "versions"
+
+
+def repolens_staging_index_path(repo_root: str | Path, build_id: str) -> Path:
+    """Return a staging path for a fresh index build."""
+    return repolens_index_dir(repo_root) / "staging" / build_id / "index.db"
+
+
+def _resolve_pointer(pointer: Path, repo_root: Path) -> Path | None:
+    try:
+        target_text = pointer.read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+    if not target_text:
+        return None
+    candidate = Path(target_text)
+    if not candidate.is_absolute():
+        candidate = (repo_root / candidate).resolve()
+    return candidate if candidate.exists() else None
+
+
+def repolens_current_index_path(repo_root: str | Path) -> Path | None:
+    """Resolve the active durable index file for a repository, if one exists."""
+    root = Path(repo_root).expanduser().resolve()
+    pointer = repolens_active_index_pointer(root)
+    if pointer.exists():
+        active = _resolve_pointer(pointer, root)
+        if active is not None:
+            return active
+    legacy = repolens_index_dir(root) / "index.db"
+    if legacy.exists():
+        return legacy
+    versions_root = repolens_versioned_index_root(root)
+    if versions_root.exists():
+        candidates = sorted(
+            (candidate for candidate in versions_root.rglob("index.db") if candidate.is_file()),
+            key=lambda candidate: candidate.stat().st_mtime_ns,
+            reverse=True,
+        )
+        if candidates:
+            return candidates[0]
+    return None
+
+
+def repolens_publish_active_index(repo_root: str | Path, index_path: str | Path) -> Path:
+    """Atomically publish a staged index by updating the active pointer file."""
+    root = Path(repo_root).expanduser().resolve()
+    target = Path(index_path).expanduser().resolve()
+    pointer = repolens_active_index_pointer(root)
+    pointer.parent.mkdir(parents=True, exist_ok=True)
+    tmp_pointer = pointer.with_name(
+        f"{pointer.name}.{os.getpid()}.{target.stat().st_mtime_ns}.tmp"
+    )
+    tmp_pointer.write_text(str(target), encoding="utf-8")
+    os.replace(tmp_pointer, pointer)
+    return target
 
 
 def repolens_package_root() -> Path:

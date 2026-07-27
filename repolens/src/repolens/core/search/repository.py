@@ -10,8 +10,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+import networkx as nx
+
 from repolens.core.graph.store import GraphStore
 from repolens.core.providers.base import MockEmbedder
+from repolens.core.paths import repolens_current_index_path
 from repolens.core.search.bm25 import BM25Index
 
 
@@ -31,8 +34,8 @@ class RepositorySearch:
 
     def __init__(self, repo_path: str | Path) -> None:
         self.repo_path = Path(repo_path).resolve()
-        self.index_path = self.repo_path / ".repolens" / "index.db"
-        if not self.index_path.exists():
+        self.index_path = repolens_current_index_path(self.repo_path)
+        if self.index_path is None:
             raise FileNotFoundError(f"Repository is not indexed: {self.repo_path}")
         self.store = GraphStore(self.index_path, read_only=True)
 
@@ -177,11 +180,89 @@ class RepositorySearch:
             )
         return results
 
-    def symbols(self, name: str, kind: str | None = None, limit: int = 50) -> list[dict]:
-        return self.store.find_symbols(name, kind=kind, limit=limit)
-
     def graph(self) -> nx.DiGraph:
         return self._graph_snapshot().graph
+
+    def list_nodes(self, exclude_paths: set[str] | None = None) -> list[dict[str, Any]]:
+        nodes = [{"id": node_id, **dict(data)} for node_id, data in self.graph().nodes(data=True)]
+        if exclude_paths:
+            nodes = [node for node in nodes if node["file_path"] not in exclude_paths]
+        return nodes
+
+    def symbols(self, name: str, kind: str | None = None, limit: int = 50) -> list[dict]:
+        name_lower = name.lower()
+        exact: list[dict[str, Any]] = []
+        partial: list[dict[str, Any]] = []
+        for node in self.list_nodes():
+            node_name = str(node.get("name", ""))
+            qualified_name = str(node.get("qualified_name", node_name))
+            node_kind = str(node.get("kind", ""))
+            if kind and node_kind.lower() != kind.lower():
+                continue
+            if name_lower not in node_name.lower() and name_lower not in qualified_name.lower():
+                continue
+            record = {
+                "id": node["id"],
+                "name": node_name,
+                "qualified_name": qualified_name,
+                "kind": node_kind,
+                "file_path": node.get("file_path"),
+                "line_start": node.get("line_start"),
+                "line_end": node.get("line_end"),
+                "language": node.get("language"),
+                "parent_name": node.get("parent_name"),
+                "content_hash": node.get("content_hash"),
+            }
+            if node_name.lower() == name_lower or qualified_name.lower() == name_lower:
+                exact.append(record)
+            else:
+                partial.append(record)
+        return (exact + sorted(partial, key=lambda item: item["qualified_name"]))[:limit]
+
+    def related(self, symbol: str, direction: str, kind: str | None = None) -> list[dict[str, Any]]:
+        matches = self.symbols(symbol, limit=10)
+        ids = {match["id"] for match in matches}
+        if not ids:
+            return []
+        graph = self.graph()
+        results: list[dict[str, Any]] = []
+        for source, target, data in graph.edges(data=True):
+            endpoint = source if direction == "out" else target
+            if endpoint not in ids:
+                continue
+            if kind and str(data.get("kind", "")).lower() != kind.lower():
+                continue
+            other = target if direction == "out" else source
+            other_node = graph.nodes[other] if other in graph else {}
+            results.append(
+                {
+                    "source": source,
+                    "target": target,
+                    "raw_target": data.get("raw_target"),
+                    "kind": data.get("kind"),
+                    "file_path": data.get("file_path"),
+                    "line": data.get("line"),
+                    "confidence": data.get("confidence"),
+                    "name": other_node.get("name"),
+                    "qualified_name": other_node.get("qualified_name"),
+                    "node_kind": other_node.get("kind"),
+                    "node_file_path": other_node.get("file_path"),
+                    "line_start": other_node.get("line_start"),
+                    "line_end": other_node.get("line_end"),
+                }
+            )
+        return results
+
+    def stats(self) -> dict[str, int]:
+        snapshot = self._snapshot()
+        graph = self.graph()
+        return {
+            "total_nodes": graph.number_of_nodes(),
+            "total_edges": graph.number_of_edges(),
+            "total_chunks": len(snapshot.chunks),
+            "total_vectors": sum(1 for chunk in snapshot.chunks if chunk.get("embedding")),
+            "total_files": len({node_data.get("file_path") for _, node_data in graph.nodes(data=True)}),
+        }
 
     @dataclass(frozen=True)
     class _GraphSnapshot:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 from pathlib import Path
 from typing import Any, Iterable
@@ -20,17 +21,20 @@ class GraphStore:
 
     def _connect(self) -> sqlite3.Connection:
         if self.read_only:
+            timeout = float(os.environ.get("REPOLENS_SQLITE_READ_TIMEOUT", "2"))
             conn = sqlite3.connect(
                 f"{self.db_path.resolve().as_uri()}?mode=ro",
-                timeout=30,
+                timeout=timeout,
                 uri=True,
             )
         else:
-            conn = sqlite3.connect(self.db_path, timeout=30)
+            timeout = float(os.environ.get("REPOLENS_SQLITE_WRITE_TIMEOUT", "30"))
+            conn = sqlite3.connect(self.db_path, timeout=timeout)
         conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA busy_timeout=30000")
+        conn.execute(f"PRAGMA busy_timeout={int(timeout * 1000)}")
         conn.execute("PRAGMA foreign_keys=ON")
-        conn.execute("PRAGMA synchronous=FULL")
+        if not self.read_only:
+            conn.execute("PRAGMA synchronous=FULL")
         return conn
 
     def _init_db(self) -> None:
@@ -302,6 +306,13 @@ class GraphStore:
             item["embedding"] = json.loads(item["embedding"]) if item["embedding"] else None
             result.append(item)
         return result
+
+    def copy_to(self, target_path: str | Path) -> "GraphStore":
+        """Clone this database to a separate SQLite file."""
+        target = GraphStore(target_path)
+        with self._connect() as source, target._connect() as destination:
+            source.backup(destination)
+        return target
 
     def find_symbols(self, name: str, kind: str | None = None, limit: int = 50) -> list[dict]:
         pattern = f"%{name}%"

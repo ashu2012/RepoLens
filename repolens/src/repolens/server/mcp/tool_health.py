@@ -8,17 +8,21 @@ from .server import mcp, state
 
 @mcp.tool()
 async def get_health(repo_id: str | None = None) -> str:
-    def check():
-        repo = state.repository(repo_id)
-        stats = state.index(repo["id"]).store.get_stats()
-        stats["repo_id"] = repo["id"]
-        stats["status"] = repo["status"]
-        stats["staleness_seconds"] = (
+    repo = state.repository(repo_id)
+    stats = {
+        "repo_id": repo["id"],
+        "status": repo["status"],
+        "staleness_seconds": (
             round(time.time() - repo["last_indexed"], 2) if repo.get("last_indexed") else None
-        )
-        return stats
-
-    stats = await state.run_sync(check)
+        ),
+        "ready": repo["status"] == "indexed",
+    }
+    try:
+        stats.update(state.index(repo["id"]).stats())
+    except Exception as exc:
+        stats["ready"] = False
+        stats["note"] = "Index data is temporarily busy or unavailable; returning registry metadata only."
+        stats["error"] = str(exc)
     return json.dumps(stats, indent=2)
 
 

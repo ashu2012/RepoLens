@@ -12,6 +12,8 @@ from typing import Callable
 
 import structlog
 
+from repolens.core.paths import repolens_current_index_path
+
 logger = structlog.get_logger(__name__)
 ProgressCallback = Callable[[str, int], None]
 
@@ -102,6 +104,7 @@ class PipelineOrchestrator:
         self,
         repo_path: str,
         on_progress: ProgressCallback | None = None,
+        index_path: str | Path | None = None,
     ) -> PipelineResult:
         from repolens.core.graph.builder import GraphBuilder
         from repolens.core.graph.store import GraphStore
@@ -151,7 +154,7 @@ class PipelineOrchestrator:
         if on_progress:
             on_progress("store", 85)
         store_start = time.time()
-        store = GraphStore(root / ".repolens" / "index.db")
+        store = GraphStore(Path(index_path).expanduser().resolve() if index_path else root / ".repolens" / "index.db")
         store.replace_index(
             GraphBuilder().build(nodes, edges),
             chunks,
@@ -183,6 +186,7 @@ class PipelineOrchestrator:
         repo_path: str,
         last_commit: str | None = None,
         on_progress: ProgressCallback | None = None,
+        index_path: str | Path | None = None,
     ) -> PipelineResult:
         from repolens.core.graph.builder import GraphBuilder
         from repolens.core.graph.store import GraphStore
@@ -194,9 +198,11 @@ class PipelineOrchestrator:
 
         started = time.time()
         root = Path(repo_path).resolve()
-        store_path = root / ".repolens" / "index.db"
+        store_path = Path(index_path).expanduser().resolve() if index_path else (
+            repolens_current_index_path(root) or root / ".repolens" / "index.db"
+        )
         if not store_path.exists():
-            return await self.run_full(repo_path, on_progress)
+            return await self.run_full(repo_path, on_progress, index_path=store_path)
         store = GraphStore(store_path)
         parser, chunker = CodeParser(), SymbolChunker()
         files = self._discover(root, parser)

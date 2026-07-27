@@ -6,7 +6,19 @@ from .server import mcp, state
 
 
 def _related(symbol: str, direction: str, kind: str | None, repo_id: str | None) -> str:
-    return json.dumps(state.index(repo_id).store.related(symbol, direction, kind), indent=2)
+    repo = state.repository(repo_id)
+    try:
+        return json.dumps(state.index(repo["id"]).related(symbol, direction, kind), indent=2)
+    except Exception as exc:
+        return json.dumps(
+            {
+                "ready": False,
+                "results": [],
+                "error": str(exc),
+                "note": "Graph query could not complete right now; try again shortly.",
+            },
+            indent=2,
+        )
 
 
 @mcp.tool()

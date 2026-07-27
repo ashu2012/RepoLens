@@ -156,6 +156,10 @@ Build a standalone Windows executable and installer from source:
 # Install build tool
 python -m pip install nuitka
 
+rmdir /s /q t:\development\RepoLens\repolens\dist
+rmdir /s /q t:\development\RepoLens\repolens\build
+
+
 # Build portable executable (output: dist/RepoLens.exe)
 python packaging/build.py
 ```
@@ -250,7 +254,9 @@ Configure RepoLens as an MCP server in your AI coding tool:
 
 Blocking MCP queries and AST indexing run in separate bounded thread pools. Every MCP session
 persists its latest activity and schedules an incremental index 10 minutes after the most recent
-tool call. Continued activity postpones the run.
+tool call. Continued activity postpones the run. Index builds now happen on a local staging copy
+and publish by hot swap when complete, so reads keep using the last known-good index while the new
+one is being built.
 
 ## ⏰ Cron Schedule
 

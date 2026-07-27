@@ -14,7 +14,13 @@ from typing import Any
 
 import structlog
 
-from repolens.core.paths import repolens_package_root
+from repolens.core.graph.store import GraphStore
+from repolens.core.paths import (
+    repolens_current_index_path,
+    repolens_package_root,
+    repolens_publish_active_index,
+    repolens_staging_index_path,
+)
 
 logger = structlog.get_logger(__name__)
 
@@ -68,6 +74,18 @@ class IndexingService:
                     thread_name_prefix="repolens-index",
                 )
             return self._executor
+
+    @staticmethod
+    def _active_index_path(repo_path: str | Path) -> Path | None:
+        return repolens_current_index_path(repo_path)
+
+    @staticmethod
+    def _staging_index_path(repo_path: str | Path, job_id: str) -> Path:
+        return repolens_staging_index_path(repo_path, job_id)
+
+    @staticmethod
+    def _publish_index(repo_path: str | Path, staged_index: str | Path) -> Path:
+        return repolens_publish_active_index(repo_path, staged_index)
 
     def start_runtime(self) -> None:
         """Start recovery and delayed-session dispatch in a daemon thread."""
@@ -143,7 +161,7 @@ class IndexingService:
             raise ValueError(f"Unknown repository: {repo_id}")
         if mode not in {"full", "incremental", "auto"}:
             raise ValueError("mode must be full, incremental, or auto")
-        index_exists = (Path(repo["local_path"]) / ".repolens" / "index.db").exists()
+        index_exists = self._active_index_path(repo["local_path"]) is not None
         resolved_mode = ("incremental" if index_exists else "full") if mode == "auto" else mode
         if resolved_mode == "incremental" and not index_exists:
             resolved_mode = "full"
@@ -195,7 +213,7 @@ class IndexingService:
             for candidate in root.rglob("*")
             if candidate.is_file() and not ignored.intersection(candidate.parts)
         )
-        index_exists = (root / ".repolens" / "index.db").exists()
+        index_exists = self._active_index_path(root) is not None
         repo = store.add_repo(
             {
                 "id": uuid.uuid4().hex[:12],
@@ -233,7 +251,9 @@ class IndexingService:
             "mode": job["mode"],
             "job_status": job["status"],
             "durable_registry": str(_registry().db_path),
-            "durable_index": str(Path(repo["local_path"]) / ".repolens" / "index.db"),
+            "durable_index": str(self._active_index_path(repo["local_path"]) or (
+                Path(repo["local_path"]) / ".repolens" / "index.db"
+            )),
         }
 
     def cancel(self, job_id: str) -> bool:
@@ -311,11 +331,27 @@ class IndexingService:
             from repolens.core.pipeline.orchestrator import PipelineOrchestrator
 
             orchestrator = PipelineOrchestrator()
+            staged_index = self._staging_index_path(repo["local_path"], job_id)
+            staged_index.parent.mkdir(parents=True, exist_ok=True)
             if job["mode"] == "full":
-                result = asyncio.run(orchestrator.run_full(repo["local_path"], progress))
-            else:
                 result = asyncio.run(
-                    orchestrator.run_incremental(repo["local_path"], None, progress)
+                    orchestrator.run_full(
+                        repo["local_path"],
+                        progress,
+                        index_path=staged_index,
+                    )
+                )
+            else:
+                live_index = self._active_index_path(repo["local_path"])
+                if live_index is not None and live_index.exists():
+                    GraphStore(live_index, read_only=True).copy_to(staged_index)
+                result = asyncio.run(
+                    orchestrator.run_incremental(
+                        repo["local_path"],
+                        None,
+                        progress,
+                        index_path=staged_index,
+                    )
                 )
             persisted = store.get_job(job_id)
             if persisted and persisted["status"] == "cancelled":
@@ -332,6 +368,8 @@ class IndexingService:
                 store.update_repo(repo["id"], status="cancelled")
                 return
 
+            published_index = self._publish_index(repo["local_path"], staged_index)
+
             completed_at = time.time()
             stats = result.stats
             store.update_job(
@@ -345,7 +383,7 @@ class IndexingService:
                 symbols_extracted=result.symbols_extracted,
                 edges_resolved=result.edges_resolved,
                 chunks_indexed=stats.get("total_chunks", 0),
-                index_path=str(Path(repo["local_path"]) / ".repolens" / "index.db"),
+                index_path=str(published_index),
                 lease_owner=None,
                 lease_expires_at=None,
             )

@@ -13,8 +13,9 @@ from .server import mcp, state
 async def get_context(
     targets: list[str], budget: int = 4000, repo_id: str | None = None
 ) -> str:
+    repo = state.repository(repo_id)
     def build() -> str:
-        index = state.index(repo_id)
+        index = state.index(repo["id"])
         symbols = index.context_targets(targets)
         result = ContextBuilder(budget=max(100, budget)).build_for_symbols(
             symbols,
@@ -22,7 +23,10 @@ async def get_context(
         )
         return result.render()
 
-    return await state.run_sync(build)
+    try:
+        return await state.run_sync(build)
+    except Exception as exc:
+        return f"Context retrieval could not complete right now: {exc}"
 
 
 @mcp.tool()
@@ -33,8 +37,9 @@ async def fetch_context(
     budget: int = 1800,
     repo_id: str | None = None,
 ) -> str:
+    repo = state.repository(repo_id)
     def fetch() -> str:
-        index = state.index(repo_id)
+        index = state.index(repo["id"])
         source = index.read_file(file_path)
         if start_line is not None or end_line is not None:
             lines = source.splitlines()
@@ -48,9 +53,12 @@ async def fetch_context(
                 start_line=node["line_start"],
                 end_line=node["line_end"],
             )
-            for node in index.store.list_nodes()
+            for node in index.list_nodes()
             if node["file_path"] == Path(file_path).as_posix()
         ]
         return build_skeleton(source, symbols=symbols, token_budget=budget).skeleton
 
-    return await state.run_sync(fetch)
+    try:
+        return await state.run_sync(fetch)
+    except Exception as exc:
+        return f"File context could not complete right now: {exc}"
