@@ -82,6 +82,41 @@ async def test_kotlin_top_level_function_is_indexed_and_has_callers(tmp_path):
     assert any(row["name"] == "greet" for row in callers)
 
 
+@pytest.mark.asyncio
+async def test_semantic_search_expands_conceptual_query_to_websocket_code(tmp_path):
+    from repolens.core.pipeline.orchestrator import PipelineOrchestrator
+    from repolens.core.search.repository import RepositorySearch
+
+    (tmp_path / "WebSocketManager.kt").write_text(
+        "package demo\n\n"
+        "class WebSocketManager {\n"
+        "    fun publishPriceTick(symbol: String) {\n"
+        "        val message = symbol\n"
+        "    }\n"
+        "}\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "SmsFragment.java").write_text(
+        "package demo;\n\n"
+        "public class SmsFragment {\n"
+        "    void showPermissionRationaleDialog() {}\n"
+        "}\n",
+        encoding="utf-8",
+    )
+
+    await PipelineOrchestrator().run_full(str(tmp_path))
+
+    results = await RepositorySearch(tmp_path).search(
+        "realtime price streaming push updates to the phone",
+        mode="semantic",
+        top_k=5,
+    )
+
+    assert results
+    assert results[0]["file_path"].endswith("WebSocketManager.kt")
+    assert any(result["file_path"].endswith("WebSocketManager.kt") for result in results)
+
+
 def test_registry_survives_reopen(tmp_path):
     from repolens.core.persistence.registry import RegistryStore
 

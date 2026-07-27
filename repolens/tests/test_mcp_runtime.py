@@ -301,6 +301,28 @@ async def test_get_architecture_prefers_cached_snapshot(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_query_graph_returns_json_error_payload_when_repo_resolution_fails(monkeypatch):
+    from repolens.server.mcp import tool_graph
+
+    monkeypatch.setattr(
+        tool_graph.state,
+        "repository",
+        lambda repo_id=None: (_ for _ in ()).throw(RuntimeError("repository unavailable")),
+    )
+
+    result = await tool_graph.query_graph(
+        pattern="callers_of",
+        target="MarketApp",
+        repo_id="missing-repo",
+    )
+    payload = json.loads(result)
+
+    assert payload["ready"] is False
+    assert payload["results"] == []
+    assert "repository unavailable" in payload["error"]
+
+
+@pytest.mark.asyncio
 async def test_mcp_index_current_directory_without_path_uses_repo_package_root(monkeypatch, tmp_path):
     from repolens.core.paths import repolens_package_root
     from repolens.server.mcp import tool_indexing

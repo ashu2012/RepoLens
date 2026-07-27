@@ -13,7 +13,6 @@ from typing import Any
 import networkx as nx
 
 from repolens.core.graph.store import GraphStore
-from repolens.core.providers.base import MockEmbedder
 from repolens.core.paths import repolens_current_index_path
 from repolens.core.search.bm25 import BM25Index, tokenize
 
@@ -31,6 +30,31 @@ class RepositorySearch:
     _cache_lock = threading.RLock()
     _snapshot_cache: "OrderedDict[Path, _SearchSnapshot]" = OrderedDict()
     _max_cache_entries = max(1, int(os.environ.get("REPOLENS_SEARCH_CACHE_LIMIT", "8")))
+    _SEMANTIC_ALIASES: dict[str, tuple[str, ...]] = {
+        "realtime": ("live", "streaming", "push", "update", "updates", "socket", "websocket"),
+        "real-time": ("live", "streaming", "push", "update", "updates", "socket", "websocket"),
+        "stream": ("streaming", "live", "push", "socket", "websocket"),
+        "streaming": ("stream", "live", "push", "socket", "websocket"),
+        "push": ("notify", "notification", "event", "update", "updates"),
+        "update": ("refresh", "sync", "notify", "event"),
+        "updates": ("update", "refresh", "sync", "notify", "event"),
+        "phone": ("mobile", "android", "device", "app"),
+        "mobile": ("phone", "android", "device", "app"),
+        "price": ("prices", "quote", "quotes", "market", "trade", "ticker"),
+        "prices": ("price", "quote", "quotes", "market", "trade", "ticker"),
+        "trade": ("trading", "order", "market", "exchange", "execution"),
+        "trading": ("trade", "order", "market", "exchange", "execution"),
+        "socket": ("websocket", "stream", "push", "live"),
+        "websocket": ("socket", "stream", "push", "live"),
+        "ui": ("screen", "view", "fragment", "composable"),
+        "screen": ("ui", "view", "fragment", "composable"),
+        "fragment": ("ui", "screen", "view", "composable"),
+        "composable": ("ui", "screen", "view", "fragment"),
+        "viewmodel": ("state", "screen", "ui", "model"),
+        "message": ("event", "notification", "update"),
+        "notification": ("push", "event", "update"),
+        "market": ("price", "prices", "quote", "trade", "order"),
+    }
 
     def __init__(self, repo_path: str | Path) -> None:
         self.repo_path = Path(repo_path).resolve()
@@ -50,6 +74,22 @@ class RepositorySearch:
     def _normalize(vector: list[float]) -> list[float]:
         denominator = math.sqrt(sum(value * value for value in vector))
         return [value / denominator for value in vector] if denominator else vector
+
+    @classmethod
+    def _expand_query_text(cls, query: str) -> str:
+        tokens = tokenize(query)
+        if not tokens:
+            return query
+        expanded: list[str] = []
+        seen: set[str] = set()
+        for token in tokens:
+            for candidate in (token, *cls._SEMANTIC_ALIASES.get(token, ())):
+                lowered = candidate.lower()
+                if lowered in seen:
+                    continue
+                seen.add(lowered)
+                expanded.append(lowered)
+        return " ".join(expanded)
 
     def _snapshot_signature(self) -> tuple[int, int]:
         stat = self.index_path.stat()
@@ -118,13 +158,18 @@ class RepositorySearch:
         chunks = snapshot.chunks
         if not chunks:
             return []
+        model_name = next(
+            (chunk["embedding_model"] for chunk in chunks if chunk["embedding_model"]),
+            "repolens-hash-v1",
+        )
+        semantic_fallback = mode in {"semantic", "hybrid"} and not model_name.startswith("ollama:")
+        search_query = self._expand_query_text(query) if semantic_fallback else query
         bm25 = snapshot.bm25
         by_id = snapshot.by_id
-        query_tokens = set(tokenize(query))
+        query_tokens = set(tokenize(search_query if semantic_fallback else query))
         bm25_scores: dict[str, float] = {}
         semantic_scores: dict[str, float] = {}
         candidate_sources: dict[str, set[str]] = {}
-        sources: dict[str, set[str]] = {}
 
         if mode in {"bm25", "hybrid"}:
             for chunk_id, score in bm25.search(query, top_k=max(top_k * 4, 20)):
@@ -132,36 +177,38 @@ class RepositorySearch:
                 candidate_sources.setdefault(chunk_id, set()).add("bm25")
 
         if mode in {"semantic", "hybrid"}:
-            model_name = next(
-                (chunk["embedding_model"] for chunk in chunks if chunk["embedding_model"]),
-                "repolens-hash-v1",
-            )
             if model_name.startswith("ollama:"):
                 from repolens.core.providers.ollama import OllamaEmbedder
 
                 try:
                     query_vector = (
-                        await OllamaEmbedder(model=model_name.split(":", 1)[1]).embed([query])
+                        await OllamaEmbedder(model=model_name.split(":", 1)[1]).embed([search_query])
                     )[0]
                 except Exception:
                     query_vector = []
             else:
-                query_vector = (await MockEmbedder().embed([query]))[0]
-            query_vector = self._normalize([float(value) for value in query_vector])
-            semantic = (
-                sorted(
-                    (
-                        (chunk_id, sum(a * b for a, b in zip(query_vector, chunk_vec)))
-                        for chunk_id, chunk_vec in snapshot.semantic_chunks
-                    ),
-                    key=lambda item: item[1],
-                    reverse=True,
+                semantic = bm25.search(search_query, top_k=max(top_k * 6, 40))
+                max_semantic = max((score for _, score in semantic), default=0.0)
+                for chunk_id, score in semantic:
+                    semantic_scores[chunk_id] = (score / max_semantic) if max_semantic else 0.0
+                    candidate_sources.setdefault(chunk_id, set()).add("semantic")
+                query_vector = []
+            if model_name.startswith("ollama:"):
+                query_vector = self._normalize([float(value) for value in query_vector])
+                semantic = (
+                    sorted(
+                        (
+                            (chunk_id, sum(a * b for a, b in zip(query_vector, chunk_vec)))
+                            for chunk_id, chunk_vec in snapshot.semantic_chunks
+                        ),
+                        key=lambda item: item[1],
+                        reverse=True,
+                    )
+                    if query_vector else []
                 )
-                if query_vector else []
-            )
-            for chunk_id, score in semantic[:max(top_k * 4, 20)]:
-                semantic_scores[chunk_id] = (score + 1.0) / 2.0
-                candidate_sources.setdefault(chunk_id, set()).add("semantic")
+                for chunk_id, score in semantic[:max(top_k * 4, 20)]:
+                    semantic_scores[chunk_id] = (score + 1.0) / 2.0
+                    candidate_sources.setdefault(chunk_id, set()).add("semantic")
 
         results = []
         candidate_ids = set(bm25_scores) | set(semantic_scores)
