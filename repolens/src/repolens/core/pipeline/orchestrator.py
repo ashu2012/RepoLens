@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import subprocess
 import time
@@ -12,6 +13,7 @@ from typing import Callable
 
 import structlog
 
+from repolens.core.paths import repolens_architecture_snapshot_path
 from repolens.core.paths import repolens_current_index_path
 
 logger = structlog.get_logger(__name__)
@@ -100,6 +102,36 @@ class PipelineOrchestrator:
             embeddings.update({chunk.id: vector for chunk, vector in zip(batch, vectors)})
         return embeddings, model_name
 
+    @staticmethod
+    def _write_architecture_snapshot(root: Path, graph, stats: dict[str, int]) -> None:
+        from collections import Counter
+
+        from repolens.core.graph.analysis import GraphAnalyzer
+        from repolens.core.graph.community import CommunityDetector
+
+        declared = [node for node, data in graph.nodes(data=True) if data.get("kind")]
+        languages = Counter(graph.nodes[node].get("language") for node in declared)
+        kinds = Counter(graph.nodes[node].get("kind") for node in declared)
+        declared_graph = graph.subgraph(declared).copy()
+        communities = CommunityDetector().detect(declared_graph) if declared else {}
+        grouped: dict[int, list[str]] = {}
+        for node, community in communities.items():
+            grouped.setdefault(community, []).append(
+                declared_graph.nodes[node].get("qualified_name", node)
+            )
+        snapshot = {
+            "index_path": str(root / ".repolens" / "index.db"),
+            "symbols": stats.get("total_nodes", len(declared)),
+            "edges": stats.get("total_edges", graph.number_of_edges()),
+            "languages": dict(languages),
+            "symbol_kinds": dict(kinds),
+            "hub_symbols": GraphAnalyzer().hub_nodes(graph, 10),
+            "communities": grouped,
+        }
+        snapshot_path = repolens_architecture_snapshot_path(root)
+        snapshot_path.parent.mkdir(parents=True, exist_ok=True)
+        snapshot_path.write_text(json.dumps(snapshot, indent=2), encoding="utf-8")
+
     async def run_full(
         self,
         repo_path: str,
@@ -155,14 +187,16 @@ class PipelineOrchestrator:
             on_progress("store", 85)
         store_start = time.time()
         store = GraphStore(Path(index_path).expanduser().resolve() if index_path else root / ".repolens" / "index.db")
+        graph = GraphBuilder().build(nodes, edges)
         store.replace_index(
-            GraphBuilder().build(nodes, edges),
+            graph,
             chunks,
             file_states,
             embeddings,
             embedding_model,
         )
         stats = store.get_stats()
+        self._write_architecture_snapshot(root, graph, stats)
         phases.append(PhaseResult("store", time.time() - store_start, sum(stats.values()), "success"))
 
         checkpoint = Checkpoint()
@@ -273,6 +307,7 @@ class PipelineOrchestrator:
             embedding_model,
         )
         stats = store.get_stats()
+        self._write_architecture_snapshot(root, store.load_graph(), stats)
         checkpoint = Checkpoint.load(str(root)) or Checkpoint()
         checkpoint.last_commit = self._head(root)
         checkpoint.last_incremental = time.time()

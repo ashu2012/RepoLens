@@ -12,6 +12,11 @@ from typing import Any, Callable
 from fastmcp import FastMCP
 from fastmcp.server.middleware import Middleware, MiddlewareContext
 
+from repolens.core.repository_selection import (
+    select_repository,
+    select_repository_by_path,
+)
+
 
 class MCPActivityMiddleware(Middleware):
     """Persist tool activity and debounce a session-aware incremental index."""
@@ -92,17 +97,12 @@ class ServerState:
     def repository(self, repo_id: str | None = None) -> dict:
         from repolens.core.persistence import registry
 
-        if repo_id:
-            repo = registry.get_repo(repo_id)
-            if not repo:
-                raise ValueError(f"Unknown repository: {repo_id}")
-            return repo
-        indexed = [repo for repo in registry.list_repos() if repo["status"] == "indexed"]
-        if len(indexed) != 1:
+        repo = select_repository(registry, repo_id=repo_id)
+        if repo is None:
             raise ValueError(
-                "repo_id is required unless exactly one indexed repository is registered"
+                "No indexed repository is available; register or index a repository first"
             )
-        return indexed[0]
+        return repo
 
     def index(self, repo_id: str | None = None):
         from repolens.core.search.repository import RepositorySearch
@@ -112,13 +112,11 @@ class ServerState:
     def activity_repository(self, repo_id: str | None = None) -> dict[str, Any] | None:
         from repolens.core.persistence import registry
 
-        if repo_id:
-            return registry.get_repo(repo_id)
-        current = registry.find_repo_by_path(str(Path.cwd().resolve()))
-        if current:
-            return current
-        repos = registry.list_repos()
-        return repos[0] if len(repos) == 1 else None
+        return select_repository_by_path(
+            registry,
+            repo_id=repo_id,
+            cwd=Path.cwd(),
+        )
 
     def record_activity(self, session_id: str, repo_id: str | None = None) -> dict[str, Any]:
         from repolens.core.pipeline.service import indexing_service

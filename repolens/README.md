@@ -232,6 +232,11 @@ Configure RepoLens as an MCP server in your AI coding tool:
 }
 ```
 
+When `repo_id` is omitted, RepoLens now picks the best available repository automatically:
+the current workspace if it already has an index, then the RepoLens install/project root if
+that repo is indexed, and then the most recently indexed repository. You can pin the default
+with `REPOLENS_DEFAULT_REPO_ID` or `REPOLENS_WORKSPACE` when you want a fixed startup context.
+
 ### Available Tools
 
 | Tool | Description |

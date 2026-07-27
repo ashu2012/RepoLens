@@ -26,6 +26,11 @@ def repolens_staging_index_path(repo_root: str | Path, build_id: str) -> Path:
     return repolens_index_dir(repo_root) / "staging" / build_id / "index.db"
 
 
+def repolens_architecture_snapshot_path(repo_root: str | Path) -> Path:
+    """Return the cached architecture snapshot path."""
+    return repolens_index_dir(repo_root) / "architecture.json"
+
+
 def _resolve_pointer(pointer: Path, repo_root: Path) -> Path | None:
     try:
         target_text = pointer.read_text(encoding="utf-8").strip()

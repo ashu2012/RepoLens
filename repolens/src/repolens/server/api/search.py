@@ -3,6 +3,7 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
+from repolens.core.repository_selection import select_repository
 from repolens.core.persistence import registry
 from repolens.core.search.repository import RepositorySearch
 
@@ -17,18 +18,16 @@ class SearchQuery(BaseModel):
 
 
 def select_repo(repo_id: str | None) -> dict:
-    if repo_id:
-        repo = registry.get_repo(repo_id)
-        if not repo:
-            raise HTTPException(status_code=404, detail=f"Repository not found: {repo_id}")
-        return repo
-    indexed = [repo for repo in registry.list_repos() if repo["status"] == "indexed"]
-    if len(indexed) != 1:
+    try:
+        repo = select_repository(registry, repo_id=repo_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    if repo is None:
         raise HTTPException(
             status_code=400,
-            detail="repo_id is required unless exactly one indexed repository is registered",
+            detail="No indexed repository is available; register or index a repository first",
         )
-    return indexed[0]
+    return repo
 
 
 @router.post("")
@@ -63,10 +62,15 @@ async def search_get(
 
 
 @router.get("/symbols")
-async def search_symbols(repo_id: str, name: str, kind: str | None = None, limit: int = 50):
+async def search_symbols(
+    name: str,
+    repo_id: str | None = None,
+    kind: str | None = None,
+    limit: int = 50,
+):
     repo = select_repo(repo_id)
     try:
         results = RepositorySearch(repo["local_path"]).symbols(name, kind, limit)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return {"repo_id": repo_id, "count": len(results), "results": results}
+    return {"repo_id": repo["id"], "count": len(results), "results": results}
