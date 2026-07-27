@@ -8,6 +8,7 @@ import json
 import threading
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -274,6 +275,39 @@ async def test_get_health_uses_active_index_when_repo_is_indexing(monkeypatch):
     assert payload["total_nodes"] == 1
     assert payload["total_files"] == 1
     assert called["value"] is True
+
+
+@pytest.mark.asyncio
+async def test_mcp_activity_middleware_records_in_background(monkeypatch):
+    from repolens.server.mcp.server import MCPActivityMiddleware, state
+
+    completed = asyncio.Event()
+
+    async def fake_run_sync(function, *args, **kwargs):
+        await asyncio.sleep(0.2)
+        function(*args, **kwargs)
+        completed.set()
+        return {"recorded": True}
+
+    monkeypatch.setattr(state, "run_sync", fake_run_sync)
+    monkeypatch.setattr(state, "record_activity", lambda *args, **kwargs: {"recorded": True})
+
+    middleware = MCPActivityMiddleware()
+    context = SimpleNamespace(
+        fastmcp_context=None,
+        message=SimpleNamespace(arguments={"repo_id": "repo-1"}),
+    )
+
+    async def call_next(_context):
+        return "ok"
+
+    started = time.perf_counter()
+    result = await middleware.on_call_tool(context, call_next)
+    elapsed = time.perf_counter() - started
+
+    assert result == "ok"
+    assert elapsed < 0.1
+    await asyncio.wait_for(completed.wait(), timeout=1)
 
 
 @pytest.mark.asyncio

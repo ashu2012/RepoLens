@@ -22,6 +22,7 @@ _current_session_id: contextvars.ContextVar[str | None] = contextvars.ContextVar
     "repolens_current_session_id",
     default=None,
 )
+_background_tasks: set[asyncio.Task[Any]] = set()
 
 
 class MCPActivityMiddleware(Middleware):
@@ -42,10 +43,21 @@ class MCPActivityMiddleware(Middleware):
             arguments = getattr(context.message, "arguments", None) or {}
             repo_id = arguments.get("repo_id")
             try:
-                await state.run_sync(state.record_activity, session_id, repo_id)
-            except Exception:
-                # Activity tracking must never turn a successful MCP tool into a failure.
-                pass
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                loop = None
+
+            async def _record_activity() -> None:
+                try:
+                    await state.run_sync(state.record_activity, session_id, repo_id)
+                except Exception:
+                    # Activity tracking must never turn a successful MCP tool into a failure.
+                    pass
+
+            if loop is not None:
+                activity_task = loop.create_task(_record_activity())
+                _background_tasks.add(activity_task)
+                activity_task.add_done_callback(_background_tasks.discard)
             if session_token is not None:
                 _current_session_id.reset(session_token)
 
