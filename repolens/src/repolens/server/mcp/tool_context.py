@@ -53,7 +53,7 @@ async def fetch_context(
                 start_line=node["line_start"],
                 end_line=node["line_end"],
             )
-            for node in index.list_nodes()
+            for node in index.store.list_nodes()
             if node["file_path"] == Path(file_path).as_posix()
         ]
         return build_skeleton(source, symbols=symbols, token_budget=budget).skeleton

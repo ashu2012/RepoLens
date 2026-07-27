@@ -106,9 +106,10 @@ class PipelineOrchestrator:
     def _write_architecture_snapshot(root: Path, graph, stats: dict[str, int]) -> None:
         from collections import Counter
 
-        from repolens.core.graph.analysis import GraphAnalyzer
+        from repolens.core.graph.analysis import GraphAnalyzer, architecture_focus_graph
         from repolens.core.graph.community import CommunityDetector
 
+        graph = architecture_focus_graph(graph)
         declared = [node for node, data in graph.nodes(data=True) if data.get("kind")]
         languages = Counter(graph.nodes[node].get("language") for node in declared)
         kinds = Counter(graph.nodes[node].get("kind") for node in declared)

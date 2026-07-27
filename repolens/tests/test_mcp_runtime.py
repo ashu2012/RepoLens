@@ -194,6 +194,7 @@ async def test_mcp_index_current_directory_returns_async_job(tmp_path, monkeypat
 @pytest.mark.asyncio
 async def test_repository_search_reuses_cached_snapshot(tmp_path, monkeypatch):
     from repolens.core.graph.store import GraphStore
+    from repolens.core.persistence.registry import RegistryStore
     from repolens.core.pipeline.service import IndexingService
     from repolens.core.search.repository import RepositorySearch
 
@@ -203,6 +204,8 @@ async def test_repository_search_reuses_cached_snapshot(tmp_path, monkeypatch):
         "def lookup(value):\n    return value.strip().lower()\n",
         encoding="utf-8",
     )
+    durable_registry = RegistryStore(tmp_path / "data" / "registry.db")
+    _replace_registry(monkeypatch, durable_registry)
     service = IndexingService(index_workers=1, poll_interval=0.01)
     result = service.index_directory(repository)
     assert service.wait(result["job_id"], timeout=30)["status"] == "completed"

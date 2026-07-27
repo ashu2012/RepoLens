@@ -15,7 +15,7 @@ import networkx as nx
 from repolens.core.graph.store import GraphStore
 from repolens.core.providers.base import MockEmbedder
 from repolens.core.paths import repolens_current_index_path
-from repolens.core.search.bm25 import BM25Index
+from repolens.core.search.bm25 import BM25Index, tokenize
 
 
 @dataclass(frozen=True)
@@ -120,14 +120,16 @@ class RepositorySearch:
             return []
         bm25 = snapshot.bm25
         by_id = snapshot.by_id
-        rankings: dict[str, float] = {}
+        query_tokens = set(tokenize(query))
+        bm25_scores: dict[str, float] = {}
+        semantic_scores: dict[str, float] = {}
+        candidate_sources: dict[str, set[str]] = {}
         sources: dict[str, set[str]] = {}
-        rrf_k = 60
 
         if mode in {"bm25", "hybrid"}:
-            for rank, (chunk_id, _) in enumerate(bm25.search(query, top_k=max(top_k * 4, 20))):
-                rankings[chunk_id] = rankings.get(chunk_id, 0.0) + 1 / (rrf_k + rank + 1)
-                sources.setdefault(chunk_id, set()).add("bm25")
+            for chunk_id, score in bm25.search(query, top_k=max(top_k * 4, 20)):
+                bm25_scores[chunk_id] = score
+                candidate_sources.setdefault(chunk_id, set()).add("bm25")
 
         if mode in {"semantic", "hybrid"}:
             model_name = next(
@@ -157,12 +159,30 @@ class RepositorySearch:
                 )
                 if query_vector else []
             )
-            for rank, (chunk_id, _) in enumerate(semantic[:max(top_k * 4, 20)]):
-                rankings[chunk_id] = rankings.get(chunk_id, 0.0) + 1 / (rrf_k + rank + 1)
-                sources.setdefault(chunk_id, set()).add("semantic")
+            for chunk_id, score in semantic[:max(top_k * 4, 20)]:
+                semantic_scores[chunk_id] = (score + 1.0) / 2.0
+                candidate_sources.setdefault(chunk_id, set()).add("semantic")
 
         results = []
-        for chunk_id, score in sorted(rankings.items(), key=lambda item: item[1], reverse=True)[:top_k]:
+        candidate_ids = set(bm25_scores) | set(semantic_scores)
+        scored_candidates: list[tuple[str, float]] = []
+        max_bm25 = max(bm25_scores.values(), default=0.0)
+        max_semantic = max(semantic_scores.values(), default=0.0)
+        for chunk_id in candidate_ids:
+            chunk = by_id[chunk_id]
+            lexical_terms = set(tokenize(f"{chunk['symbol_name']} {chunk['file_path']} {chunk['content'][:1000]}"))
+            overlap = len(query_tokens & lexical_terms) / max(1, len(query_tokens))
+            lexical_boost = overlap * 0.15
+            symbol_name = str(chunk["symbol_name"]).lower()
+            qualified_name = str(chunk.get("qualified_name", chunk["symbol_name"])).lower()
+            if any(term in symbol_name or term in qualified_name for term in query_tokens):
+                lexical_boost += 0.08
+            bm25_component = (bm25_scores.get(chunk_id, 0.0) / max_bm25) if max_bm25 else 0.0
+            semantic_component = semantic_scores.get(chunk_id, 0.0)
+            final_score = (bm25_component * 0.45) + (semantic_component * 0.45) + lexical_boost
+            scored_candidates.append((chunk_id, final_score))
+
+        for chunk_id, score in sorted(scored_candidates, key=lambda item: item[1], reverse=True)[:top_k]:
             chunk = by_id[chunk_id]
             content = chunk["content"].strip()
             results.append(
@@ -175,7 +195,7 @@ class RepositorySearch:
                     "line_start": chunk["line_start"],
                     "line_end": chunk["line_end"],
                     "snippet": content[:700],
-                    "source": "+".join(sorted(sources.get(chunk_id, {"unknown"}))),
+                    "source": "+".join(sorted(candidate_sources.get(chunk_id, {"unknown"}))),
                 }
             )
         return results
@@ -184,85 +204,16 @@ class RepositorySearch:
         return self._graph_snapshot().graph
 
     def list_nodes(self, exclude_paths: set[str] | None = None) -> list[dict[str, Any]]:
-        nodes = [{"id": node_id, **dict(data)} for node_id, data in self.graph().nodes(data=True)]
-        if exclude_paths:
-            nodes = [node for node in nodes if node["file_path"] not in exclude_paths]
-        return nodes
+        return self.store.list_nodes(exclude_paths=exclude_paths)
 
     def symbols(self, name: str, kind: str | None = None, limit: int = 50) -> list[dict]:
-        name_lower = name.lower()
-        exact: list[dict[str, Any]] = []
-        partial: list[dict[str, Any]] = []
-        for node in self.list_nodes():
-            node_name = str(node.get("name", ""))
-            qualified_name = str(node.get("qualified_name", node_name))
-            node_kind = str(node.get("kind", ""))
-            if kind and node_kind.lower() != kind.lower():
-                continue
-            if name_lower not in node_name.lower() and name_lower not in qualified_name.lower():
-                continue
-            record = {
-                "id": node["id"],
-                "name": node_name,
-                "qualified_name": qualified_name,
-                "kind": node_kind,
-                "file_path": node.get("file_path"),
-                "line_start": node.get("line_start"),
-                "line_end": node.get("line_end"),
-                "language": node.get("language"),
-                "parent_name": node.get("parent_name"),
-                "content_hash": node.get("content_hash"),
-            }
-            if node_name.lower() == name_lower or qualified_name.lower() == name_lower:
-                exact.append(record)
-            else:
-                partial.append(record)
-        return (exact + sorted(partial, key=lambda item: item["qualified_name"]))[:limit]
+        return self.store.find_symbols(name, kind=kind, limit=limit)
 
     def related(self, symbol: str, direction: str, kind: str | None = None) -> list[dict[str, Any]]:
-        matches = self.symbols(symbol, limit=10)
-        ids = {match["id"] for match in matches}
-        if not ids:
-            return []
-        graph = self.graph()
-        results: list[dict[str, Any]] = []
-        for source, target, data in graph.edges(data=True):
-            endpoint = source if direction == "out" else target
-            if endpoint not in ids:
-                continue
-            if kind and str(data.get("kind", "")).lower() != kind.lower():
-                continue
-            other = target if direction == "out" else source
-            other_node = graph.nodes[other] if other in graph else {}
-            results.append(
-                {
-                    "source": source,
-                    "target": target,
-                    "raw_target": data.get("raw_target"),
-                    "kind": data.get("kind"),
-                    "file_path": data.get("file_path"),
-                    "line": data.get("line"),
-                    "confidence": data.get("confidence"),
-                    "name": other_node.get("name"),
-                    "qualified_name": other_node.get("qualified_name"),
-                    "node_kind": other_node.get("kind"),
-                    "node_file_path": other_node.get("file_path"),
-                    "line_start": other_node.get("line_start"),
-                    "line_end": other_node.get("line_end"),
-                }
-            )
-        return results
+        return self.store.related(symbol, direction, kind)
 
     def stats(self) -> dict[str, int]:
-        snapshot = self._snapshot()
-        graph = self.graph()
-        return {
-            "total_nodes": graph.number_of_nodes(),
-            "total_edges": graph.number_of_edges(),
-            "total_chunks": len(snapshot.chunks),
-            "total_vectors": sum(1 for chunk in snapshot.chunks if chunk.get("embedding")),
-            "total_files": len({node_data.get("file_path") for _, node_data in graph.nodes(data=True)}),
-        }
+        return self.store.get_stats()
 
     @dataclass(frozen=True)
     class _GraphSnapshot:
@@ -295,7 +246,15 @@ class RepositorySearch:
     def context_targets(self, targets: list[str]) -> list[dict]:
         found: dict[str, dict] = {}
         for target in targets:
-            for symbol in self.symbols(target, limit=10):
+            matches = self.store.find_symbols(target, limit=10)
+            if not matches:
+                continue
+            exact = [
+                symbol for symbol in matches
+                if str(symbol.get("name", "")).lower() == target.lower()
+                or str(symbol.get("qualified_name", "")).lower() == target.lower()
+            ]
+            for symbol in exact or matches:
                 found[symbol["id"]] = symbol
         return list(found.values())
 

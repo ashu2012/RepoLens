@@ -4,7 +4,7 @@ import json
 from collections import Counter
 from pathlib import Path
 
-from repolens.core.graph.analysis import GraphAnalyzer
+from repolens.core.graph.analysis import GraphAnalyzer, architecture_focus_graph
 from repolens.core.paths import repolens_architecture_snapshot_path
 
 from .server import mcp, state
@@ -31,10 +31,13 @@ async def get_architecture(repo_id: str | None = None) -> str:
                 "edges": snapshot.get("edges", 0),
                 "languages": snapshot.get("languages", {}),
                 "symbol_kinds": snapshot.get("symbol_kinds", {}),
-                "hub_symbols": snapshot.get("hub_symbols", []),
+                "hub_symbols": [
+                    hub for hub in snapshot.get("hub_symbols", [])
+                    if "import" not in str(hub).lower()
+                ],
             }
         else:
-            graph = state.index(repo["id"]).graph()
+            graph = architecture_focus_graph(state.index(repo["id"]).graph())
             declared = [node for node, data in graph.nodes(data=True) if data.get("kind")]
             languages = Counter(graph.nodes[node].get("language") for node in declared)
             kinds = Counter(graph.nodes[node].get("kind") for node in declared)
@@ -56,11 +59,17 @@ async def get_communities(repo_id: str | None = None) -> str:
         repo = state.repository(repo_id)
         snapshot = _load_snapshot(repo["local_path"])
         if snapshot is not None and snapshot.get("communities") is not None:
-            return json.dumps(snapshot["communities"], indent=2)
-        graph = state.index(repo["id"]).graph()
-        declared = graph.subgraph(
-            [node for node, data in graph.nodes(data=True) if data.get("kind")]
-        ).copy()
+            cleaned = {
+                community: [
+                    node for node in nodes
+                    if "import" not in str(node).lower()
+                ]
+                for community, nodes in snapshot["communities"].items()
+            }
+            cleaned = {community: nodes for community, nodes in cleaned.items() if nodes}
+            return json.dumps(cleaned, indent=2)
+        graph = architecture_focus_graph(state.index(repo["id"]).graph())
+        declared = graph.subgraph([node for node, data in graph.nodes(data=True) if data.get("kind")]).copy()
         if not declared.nodes:
             return "[]"
         from repolens.core.graph.community import CommunityDetector

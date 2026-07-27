@@ -349,18 +349,39 @@ class GraphStore:
         ids = {match["id"] for match in matches}
         if not ids:
             return []
+        expand_children = bool(kind and str(kind).upper() == "CALLS")
         placeholders = ",".join("?" for _ in ids)
         endpoint = "source" if direction == "out" else "target"
         other = "target" if direction == "out" else "source"
-        query = f"""SELECT e.*, n.name, n.qualified_name, n.file_path,
-                           n.line_start, n.line_end, n.kind AS node_kind
-                    FROM edges e LEFT JOIN nodes n ON n.id = e.{other}
-                    WHERE e.{endpoint} IN ({placeholders})"""
-        params: list[Any] = list(ids)
-        if kind:
-            query += " AND lower(e.kind) = lower(?)"
-            params.append(kind)
         with self._connect() as conn:
+            if expand_children:
+                frontier = set(ids)
+                expanded = set(ids)
+                while frontier:
+                    child_placeholders = ",".join("?" for _ in frontier)
+                    child_rows = conn.execute(
+                        f"""SELECT target FROM edges
+                            WHERE source IN ({child_placeholders})
+                              AND lower(kind) = 'contains'""",
+                        list(frontier),
+                    ).fetchall()
+                    frontier = {
+                        row["target"]
+                        for row in child_rows
+                        if row["target"] not in expanded
+                    }
+                    expanded.update(frontier)
+                ids = expanded
+                placeholders = ",".join("?" for _ in ids)
+
+            query = f"""SELECT e.*, n.name, n.qualified_name, n.file_path,
+                               n.line_start, n.line_end, n.kind AS node_kind
+                        FROM edges e LEFT JOIN nodes n ON n.id = e.{other}
+                        WHERE e.{endpoint} IN ({placeholders})"""
+            params: list[Any] = list(ids)
+            if kind:
+                query += " AND lower(e.kind) = lower(?)"
+                params.append(kind)
             return [dict(row) for row in conn.execute(query, params).fetchall()]
 
     def reconcile_edges(self) -> int:
