@@ -15,8 +15,9 @@ try {
 
     $BuildDir = Join-Path $ProjectDir "dist\release-build"
     $PortableExe = Join-Path $ProjectDir "dist\RepoLens.exe"
-    # Keep Nuitka's writable bytecode cache inside the build tree. This avoids
-    # stale or locked cache entries shared by other Python/Nuitka installs.
+    # Keep every writable Nuitka cache inside the build tree. This avoids
+    # stale, locked, or access-restricted entries shared by other installations.
+    $env:NUITKA_CACHE_DIR = Join-Path $BuildDir "nuitka-cache"
     $env:NUITKA_CACHE_DIR_MODULE_CACHE = Join-Path $BuildDir "module-cache"
     $nuitkaArgs = @(
         "-m", "nuitka",

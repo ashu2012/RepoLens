@@ -695,3 +695,5 @@ repolens/nuitka-crash-report.xml
 repolens/dist/cpython-build.stderr.log
 repolens/dist/cpython-build.stdout.log
 repolens/dist/__main__.build/ccache-36500.txt
+repolens/dist/*
+repowise/tests/fixtures/jvm_sample/.gradle/buildOutputCleanup/cache.properties
