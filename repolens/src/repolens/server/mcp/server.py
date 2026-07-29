@@ -2,9 +2,11 @@
 
 import asyncio
 import contextvars
+import json
 import os
 import sys
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial
 from pathlib import Path
@@ -25,12 +27,31 @@ _current_session_id: contextvars.ContextVar[str | None] = contextvars.ContextVar
 _background_tasks: set[asyncio.Task[Any]] = set()
 
 
+def _format_mcp_arguments(arguments: Any, *, limit: int = 700) -> str:
+    """Format MCP call arguments for console logging without flooding stdout."""
+    if not arguments:
+        return "{}"
+    try:
+        rendered = json.dumps(arguments, default=str, ensure_ascii=False)
+    except Exception:
+        rendered = repr(arguments)
+    rendered = rendered.replace("\n", " ")
+    if len(rendered) > limit:
+        rendered = rendered[:limit] + "…"
+    return rendered
+
+
 class MCPActivityMiddleware(Middleware):
     """Persist tool activity and debounce a session-aware incremental index."""
 
     async def on_call_tool(self, context: MiddlewareContext, call_next):
         session_token = None
         session_id = f"in-process:{os.getpid()}"
+        arguments = getattr(context.message, "arguments", None) or {}
+        tool_name = getattr(context.message, "name", "<unknown>")
+        started_at = time.perf_counter()
+        call_success = False
+        call_error: str | None = None
         try:
             if context.fastmcp_context is not None:
                 try:
@@ -38,10 +59,40 @@ class MCPActivityMiddleware(Middleware):
                 except RuntimeError:
                     pass
             session_token = _current_session_id.set(session_id)
-            return await call_next(context)
+            print(
+                "[RepoLens MCP] start "
+                f"tool={tool_name} session={session_id} "
+                f"repo_id={arguments.get('repo_id')} args={_format_mcp_arguments(arguments)}",
+                flush=True,
+            )
+            result = await call_next(context)
+            call_success = True
+            return result
+        except Exception as exc:
+            call_error = f"{exc.__class__.__name__}: {exc}"
+            raise
         finally:
-            arguments = getattr(context.message, "arguments", None) or {}
-            repo_id = arguments.get("repo_id")
+            duration_ms = (time.perf_counter() - started_at) * 1000
+            print(
+                "[RepoLens MCP] "
+                f"{'done' if call_success else 'error'} "
+                f"tool={tool_name} session={session_id} "
+                f"repo_id={arguments.get('repo_id')} duration_ms={duration_ms:.1f}"
+                + ("" if call_success else f" error={call_error}"),
+                flush=True,
+            )
+            try:
+                from repolens.observability.mcp_monitor import mcp_monitor
+
+                mcp_monitor.record_call(
+                    tool_name,
+                    duration_ms,
+                    call_success,
+                    error=call_error,
+                )
+            except Exception:
+                # Monitoring must never affect MCP tool execution.
+                pass
             try:
                 loop = asyncio.get_running_loop()
             except RuntimeError:
@@ -49,7 +100,11 @@ class MCPActivityMiddleware(Middleware):
 
             async def _record_activity() -> None:
                 try:
-                    await state.run_sync(state.record_activity, session_id, repo_id)
+                    await state.run_sync(
+                        state.record_activity,
+                        session_id,
+                        arguments.get("repo_id"),
+                    )
                 except Exception:
                     # Activity tracking must never turn a successful MCP tool into a failure.
                     pass

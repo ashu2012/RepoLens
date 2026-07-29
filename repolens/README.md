@@ -217,6 +217,8 @@ For full build details, see [packaging/README.md](packaging/README.md).
 └─────────────────────────────────────────────────────┘
 ```
 
+For the low-level runtime view and sequence diagrams, see [docs/architecture.md](../docs/architecture.md).
+
 ## 🤖 MCP Tools
 
 Configure RepoLens as an MCP server in your AI coding tool:
@@ -225,8 +227,9 @@ Configure RepoLens as an MCP server in your AI coding tool:
 {
   "mcpServers": {
     "repolens": {
-      "command": "repolens",
-      "args": ["mcp"]
+      "command": "T:\\development\\RepoLens\\repolens\\.venv\\Scripts\\repolens.exe",
+      "args": ["mcp"],
+      "cwd": "T:\\development"
     }
   }
 }

@@ -273,11 +273,9 @@ Alternatively, create `.mcp.json` in the project:
   "mcpServers": {
     "repolens": {
       "type": "stdio",
-      "command": "/absolute/path/to/RepoLens/repolens/.venv/bin/python",
-      "args": ["-m", "repolens", "mcp"],
-      "env": {
-        "REPOLENS_DATA_DIR": "/absolute/path/to/RepoLens/repolens/.repolens"
-      }
+      "command": "T:\\development\\RepoLens\\repolens\\.venv\\Scripts\\repolens.exe",
+      "args": ["mcp"],
+      "cwd": "T:\\development"
     }
   }
 }

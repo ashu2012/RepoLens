@@ -283,10 +283,12 @@ async def test_get_health_uses_active_index_when_repo_is_indexing(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_mcp_activity_middleware_records_in_background(monkeypatch):
+async def test_mcp_activity_middleware_records_in_background(monkeypatch, capsys):
     from repolens.server.mcp.server import MCPActivityMiddleware, state
+    from repolens.observability.mcp_monitor import mcp_monitor
 
     completed = asyncio.Event()
+    recorded_calls: list[tuple[tuple[object, ...], dict[str, object]]] = []
 
     async def fake_run_sync(function, *args, **kwargs):
         await asyncio.sleep(0.2)
@@ -296,11 +298,19 @@ async def test_mcp_activity_middleware_records_in_background(monkeypatch):
 
     monkeypatch.setattr(state, "run_sync", fake_run_sync)
     monkeypatch.setattr(state, "record_activity", lambda *args, **kwargs: {"recorded": True})
+    monkeypatch.setattr(
+        mcp_monitor,
+        "record_call",
+        lambda *args, **kwargs: recorded_calls.append((args, kwargs)),
+    )
 
     middleware = MCPActivityMiddleware()
     context = SimpleNamespace(
         fastmcp_context=None,
-        message=SimpleNamespace(arguments={"repo_id": "repo-1"}),
+        message=SimpleNamespace(
+            name="search_symbols",
+            arguments={"repo_id": "repo-1", "query": "MarketApp"},
+        ),
     )
 
     async def call_next(_context):
@@ -312,6 +322,12 @@ async def test_mcp_activity_middleware_records_in_background(monkeypatch):
 
     assert result == "ok"
     assert elapsed < 0.1
+    output = capsys.readouterr().out
+    assert "[RepoLens MCP] start tool=search_symbols" in output
+    assert "[RepoLens MCP] done tool=search_symbols" in output
+    assert recorded_calls
+    assert recorded_calls[0][0][0] == "search_symbols"
+    assert recorded_calls[0][0][2] is True
     await asyncio.wait_for(completed.wait(), timeout=1)
 
 
@@ -552,6 +568,41 @@ def test_openapi_bridge_indexes_current_directory(tmp_path, monkeypatch):
 
     assert payload["status"] == "indexing_started"
     assert job["status"] == "completed"
+
+
+def test_http_mcp_bridge_traces_calls(capsys, monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from repolens.server.api import mcp as mcp_api
+    from repolens.server.app import create_app
+
+    class FakeToolResult:
+        def __init__(self):
+            self.content = [SimpleNamespace(model_dump=lambda mode="json": {"text": "ok"})]
+
+    async def fake_list_tools():
+        return [SimpleNamespace(name="search_symbols", description="", parameters={})]
+
+    async def fake_call_tool(name, arguments=None, *args, **kwargs):
+        return FakeToolResult()
+
+    monkeypatch.setattr(mcp_api.mcp, "list_tools", fake_list_tools)
+    monkeypatch.setattr(mcp_api.mcp, "call_tool", fake_call_tool)
+
+    with TestClient(create_app()) as client:
+        response = client.post(
+            "/api/mcp/call",
+            json={
+                "tool": "search_symbols",
+                "arguments": {"name": "calculate_invoice", "repo_id": "repo-1"},
+            },
+        )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["result"]["content"][0]["text"] == "ok"
+    output = capsys.readouterr().out
+    assert "[RepoLens MCP HTTP] start tool=search_symbols" in output
+    assert "[RepoLens MCP HTTP] done tool=search_symbols" in output
 
 
 def test_session_activity_debounces_and_queues_incremental_index(tmp_path, monkeypatch):
