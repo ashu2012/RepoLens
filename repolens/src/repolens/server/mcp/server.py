@@ -84,6 +84,8 @@ class ServerState:
         )
         self._executor: ThreadPoolExecutor | None = None
         self._executor_lock = threading.RLock()
+        self._async_executor: ThreadPoolExecutor | None = None
+        self._async_executor_lock = threading.RLock()
 
     def _ensure_executor(self) -> ThreadPoolExecutor:
         with self._executor_lock:
@@ -93,6 +95,16 @@ class ServerState:
                     thread_name_prefix="repolens-mcp",
                 )
             return self._executor
+
+    def _ensure_async_executor(self) -> ThreadPoolExecutor:
+        with self._async_executor_lock:
+            if self._async_executor is None:
+                worker_count = max(1, min(16, (self.max_workers + 1) // 2))
+                self._async_executor = ThreadPoolExecutor(
+                    max_workers=worker_count,
+                    thread_name_prefix="repolens-mcp-async",
+                )
+            return self._async_executor
 
     async def run_sync(self, function: Callable, *args, **kwargs):
         """Run blocking repository work without blocking the MCP event loop."""
@@ -108,18 +120,36 @@ class ServerState:
         )
 
     async def run_async_worker(self, function: Callable, *args, **kwargs):
-        """Run a complete async operation on a worker thread with its own loop."""
+        """Run an async operation on its own dedicated thread pool.
+
+        Uses a separate executor so that long-running async operations
+        (e.g. Ollama embedding calls) never starve the main MCP query
+        executor used by ``run_sync`` tools like ``get_health`` or
+        ``list_repos``.
+        """
+        loop = asyncio.get_running_loop()
+        context = contextvars.copy_context()
 
         def invoke():
-            return asyncio.run(function(*args, **kwargs))
+            return context.run(partial(function, *args, **kwargs))
 
-        return await self.run_sync(invoke)
+        def _run_async():
+            return asyncio.run(invoke())
+
+        return await loop.run_in_executor(
+            self._ensure_async_executor(),
+            _run_async,
+        )
 
     def shutdown(self) -> None:
         with self._executor_lock:
             executor, self._executor = self._executor, None
         if executor:
             executor.shutdown(wait=False, cancel_futures=False)
+        with self._async_executor_lock:
+            async_executor, self._async_executor = self._async_executor, None
+        if async_executor:
+            async_executor.shutdown(wait=False, cancel_futures=False)
 
     def repository(self, repo_id: str | None = None) -> dict:
         from repolens.core.persistence import registry

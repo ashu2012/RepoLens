@@ -610,3 +610,154 @@ async def test_mcp_blocking_work_uses_multiple_worker_threads():
     server_state.shutdown()
 
     assert first != second
+
+
+@pytest.mark.asyncio
+async def test_run_async_worker_uses_separate_thread_pool():
+    from repolens.server.mcp.server import ServerState
+
+    server_state = ServerState(max_workers=2)
+    complete = threading.Event()
+
+    async def _fake_search():
+        complete.wait(timeout=5)
+
+    async_task = asyncio.create_task(server_state.run_async_worker(_fake_search))
+    await asyncio.sleep(0.1)
+
+    sync_done = threading.Event()
+
+    def _quick_sync():
+        sync_done.set()
+        return threading.get_ident()
+
+    sync_result = await server_state.run_sync(_quick_sync)
+    assert sync_done.is_set()
+    assert isinstance(sync_result, int)
+
+    complete.set()
+    await async_task
+    server_state.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_concurrent_async_workers_do_not_starve_run_sync():
+    from repolens.server.mcp.server import ServerState
+
+    server_state = ServerState(max_workers=2)
+
+    async_running = threading.Event()
+    sync_done = threading.Event()
+
+    def _blocking_work():
+        async_running.set()
+        async_running.wait(timeout=5)
+
+    async def _slow_coroutine():
+        await asyncio.to_thread(_blocking_work)
+
+    async_tasks = [
+        asyncio.create_task(server_state.run_async_worker(_slow_coroutine))
+        for _ in range(6)
+    ]
+    async_running.wait(timeout=2)
+
+    def _health_check():
+        sync_done.set()
+        return "healthy"
+
+    health_task = asyncio.create_task(server_state.run_sync(_health_check))
+
+    await asyncio.sleep(0.2)
+    assert sync_done.is_set(), "run_sync must not be starved while async workers are running"
+
+    health_result = await asyncio.wait_for(health_task, timeout=2)
+    assert health_result == "healthy"
+
+    async_running.clear()
+    await asyncio.gather(*async_tasks)
+    server_state.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_run_async_worker_executors_are_distinct():
+    from repolens.server.mcp.server import ServerState
+
+    server_state = ServerState(max_workers=2)
+
+    server_state._ensure_executor()
+    server_state._ensure_async_executor()
+
+    sync_executor = server_state._executor
+    async_executor = server_state._async_executor
+
+    assert sync_executor is not None
+    assert async_executor is not None
+    assert sync_executor is not async_executor, (
+        "run_async_worker must use a separate executor from run_sync"
+        " to prevent thread starvation under concurrent load"
+    )
+
+    thread_ids = set()
+    lock = threading.Lock()
+
+    def _capture_sync():
+        with lock:
+            thread_ids.add(("sync", threading.get_ident()))
+        return "ok"
+
+    async def _capture_async():
+        with lock:
+            thread_ids.add(("async", threading.get_ident()))
+        return "ok"
+
+    tasks = [
+        asyncio.create_task(server_state.run_sync(_capture_sync)),
+        asyncio.create_task(server_state.run_sync(_capture_sync)),
+        asyncio.create_task(server_state.run_async_worker(_capture_async)),
+        asyncio.create_task(server_state.run_async_worker(_capture_async)),
+    ]
+    await asyncio.gather(*tasks)
+
+    assert len({tid for kind, tid in thread_ids}) >= 2
+    server_state.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_run_sync_health_check_completes_while_async_workers_saturated():
+    from repolens.server.mcp.server import ServerState
+
+    server_state = ServerState(max_workers=1)
+
+    running = threading.Event()
+    sync_done = threading.Event()
+
+    def _blocking():
+        running.set()
+        running.wait(timeout=5)
+
+    async def _long_async():
+        await asyncio.to_thread(_blocking)
+
+    async_tasks = [
+        asyncio.create_task(server_state.run_async_worker(_long_async))
+        for _ in range(6)
+    ]
+    running.wait(timeout=2)
+
+    def _health():
+        sync_done.set()
+        return "ok"
+
+    health_task = asyncio.create_task(server_state.run_sync(_health))
+
+    await asyncio.sleep(0.2)
+    assert sync_done.is_set(), (
+        "run_sync health check must not be starved by async workers"
+    )
+    health_result = await asyncio.wait_for(health_task, timeout=2)
+    assert health_result == "ok"
+
+    running.clear()
+    await asyncio.gather(*async_tasks)
+    server_state.shutdown()
